@@ -342,6 +342,10 @@ LOG_MODULE_REGISTER(i3c_dw, CONFIG_I3C_DW_LOG_LEVEL);
 #define DW_I3C_MAX_DEVS         32
 #define DW_I3C_MAX_CMD_BUF_SIZE 16
 
+/* Required by DEVICE_MMIO_NAMED_* macros */
+#define DEV_CFG(dev)  ((const struct dw_i3c_config *const)(dev)->config)
+#define DEV_DATA(dev) ((struct dw_i3c_data *const)(dev)->data)
+
 /* Snps I3C/I2C Device Private Data */
 struct dw_i3c_i2c_dev_data {
 	/* Device id within the retaining registers. This is set after bus initialization by the
@@ -367,8 +371,9 @@ struct dw_i3c_xfer {
 
 struct dw_i3c_config {
 	struct i3c_driver_config common;
-	const struct device *clock;
+	DEVICE_MMIO_NAMED_ROM(reg_base);
 
+	const struct device *clock;
 	/* Clock control subsys related struct */
 	clock_control_subsys_t clock_subsys;
 	uint32_t regs;
@@ -382,6 +387,8 @@ struct dw_i3c_config {
 
 struct dw_i3c_data {
 	struct i3c_driver_data common;
+	DEVICE_MMIO_NAMED_RAM(reg_base);
+
 	uint32_t free_pos;
 
 	uint16_t datstartaddr;
@@ -418,11 +425,16 @@ struct dw_i3c_data {
 #endif /* CONFIG_I3C_CONTROLLER && CONFIG_I3C_TARGET */
 };
 
+static inline mem_addr_t dw_i3c_get_base(const struct device *dev)
+{
+	return DEVICE_MMIO_NAMED_GET(dev, reg_base);
+}
+
 static inline bool dw_i3c_is_current_controller(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 
-	return !!(sys_read32(config->regs + PRESENT_STATE) & PRESENT_STATE_CURRENT_MASTER);
+	return !!(sys_read32(base + PRESENT_STATE) & PRESENT_STATE_CURRENT_MASTER);
 }
 
 #ifdef CONFIG_I3C_CONTROLLER
@@ -445,18 +457,18 @@ static void read_rx_fifo(const struct device *dev, uint8_t *buf, int32_t nbytes)
 {
 	__ASSERT((buf != NULL), "Rx buffer should not be NULL");
 
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	int32_t i;
 	uint32_t tmp;
 
 	if (nbytes >= 4) {
 		for (i = 0; i <= nbytes - 4; i += 4) {
-			tmp = sys_read32(config->regs + RX_TX_DATA_PORT);
+			tmp = sys_read32(base + RX_TX_DATA_PORT);
 			memcpy(buf + i, &tmp, 4);
 		}
 	}
 	if (nbytes & 3) {
-		tmp = sys_read32(config->regs + RX_TX_DATA_PORT);
+		tmp = sys_read32(base + RX_TX_DATA_PORT);
 		memcpy(buf + (nbytes & ~3), &tmp, nbytes & 3);
 	}
 }
@@ -475,21 +487,21 @@ static void write_tx_fifo(const struct device *dev, const uint8_t *buf, int32_t 
 {
 	__ASSERT((buf != NULL), "Tx buffer should not be NULL");
 
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	int32_t i;
 	uint32_t tmp;
 
 	if (nbytes >= 4) {
 		for (i = 0; i <= nbytes - 4; i += 4) {
 			memcpy(&tmp, buf + i, 4);
-			sys_write32(tmp, config->regs + RX_TX_DATA_PORT);
+			sys_write32(tmp, base + RX_TX_DATA_PORT);
 		}
 	}
 
 	if (nbytes & 3) {
 		tmp = 0;
 		memcpy(&tmp, buf + (nbytes & ~3), nbytes & 3);
-		sys_write32(tmp, config->regs + RX_TX_DATA_PORT);
+		sys_write32(tmp, base + RX_TX_DATA_PORT);
 	}
 }
 
@@ -509,18 +521,18 @@ static void read_ibi_fifo(const struct device *dev, uint8_t *buf, int32_t nbytes
 {
 	__ASSERT((buf != NULL), "Rx IBI buffer should not be NULL");
 
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	int32_t i;
 	uint32_t tmp;
 
 	if (nbytes >= 4) {
 		for (i = 0; i <= nbytes - 4; i += 4) {
-			tmp = sys_read32(config->regs + IBI_QUEUE_STATUS);
+			tmp = sys_read32(base + IBI_QUEUE_STATUS);
 			memcpy(buf + i, &tmp, 4);
 		}
 	}
 	if (nbytes & 3) {
-		tmp = sys_read32(config->regs + IBI_QUEUE_STATUS);
+		tmp = sys_read32(base + IBI_QUEUE_STATUS);
 		memcpy(buf + (nbytes & ~3), &tmp, nbytes & 3);
 	}
 }
@@ -532,7 +544,7 @@ static void dw_i3c_deftgts_work_fn(struct k_work *work)
 {
 	struct dw_i3c_data *data = CONTAINER_OF(work, struct dw_i3c_data, deftgts_work);
 	const struct device *dev = data->dev;
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	uint16_t count = data->deftgts_count;
 	uint32_t sdct_val;
 	uint8_t n = 0;
@@ -553,7 +565,7 @@ static void dw_i3c_deftgts_work_fn(struct k_work *work)
 	data->common.deftgts->count = count - 1;
 
 	/* First SDCT entry is the active controller */
-	sdct_val = sys_read32(config->regs + data->dctstartaddr);
+	sdct_val = sys_read32(base + data->dctstartaddr);
 	data->common.deftgts->active_controller.addr = SDCT_DYNAMIC_ADDR(sdct_val);
 	data->common.deftgts->active_controller.dcr = SDCT_DCR(sdct_val);
 	data->common.deftgts->active_controller.bcr = SDCT_BCR(sdct_val);
@@ -561,7 +573,7 @@ static void dw_i3c_deftgts_work_fn(struct k_work *work)
 
 	/* Remaining SDCT entries are targets */
 	for (uint16_t i = 1; i < count; i++) {
-		sdct_val = sys_read32(config->regs + data->dctstartaddr + (i * 4));
+		sdct_val = sys_read32(base + data->dctstartaddr + (i * 4));
 		uint8_t addr = SDCT_DYNAMIC_ADDR(sdct_val);
 		uint8_t bcr = SDCT_BCR(sdct_val);
 		uint8_t dcr_lvr = SDCT_DCR(sdct_val);
@@ -596,7 +608,7 @@ static void dw_i3c_deftgts_work_fn(struct k_work *work)
  */
 static void dw_i3c_end_xfer(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	struct dw_i3c_xfer *xfer = &data->xfer;
 	struct dw_i3c_cmd *cmd;
@@ -607,11 +619,11 @@ static void dw_i3c_end_xfer(const struct device *dev)
 	int j, k;
 #endif /* CONFIG_I3C_TARGET */
 
-	nresp = QUEUE_STATUS_LEVEL_RESP(sys_read32(config->regs + QUEUE_STATUS_LEVEL));
+	nresp = QUEUE_STATUS_LEVEL_RESP(sys_read32(base + QUEUE_STATUS_LEVEL));
 	for (i = 0; i < nresp; i++) {
 		uint8_t tid;
 
-		resp = sys_read32(config->regs + RESPONSE_QUEUE_PORT);
+		resp = sys_read32(base + RESPONSE_QUEUE_PORT);
 		tid = RESPONSE_PORT_TID(resp);
 		if (tid == 0xf) {
 #if defined(CONFIG_I3C_CONTROLLER) && defined(CONFIG_I3C_TARGET)
@@ -631,7 +643,7 @@ static void dw_i3c_end_xfer(const struct device *dev)
 				data->target_config->callbacks;
 
 			for (j = 0; j < cmd->rx_len; j += 4) {
-				rx_data = sys_read32(config->regs + RX_TX_DATA_PORT);
+				rx_data = sys_read32(base + RX_TX_DATA_PORT);
 				if (target_cb != NULL && target_cb->write_received_cb != NULL) {
 					/* Call write received cb for each remaining byte  */
 					for (k = 0; k < MIN(4, cmd->rx_len - j); k++) {
@@ -680,9 +692,9 @@ static void dw_i3c_end_xfer(const struct device *dev)
 	if (ret < 0) {
 		sys_write32(RESET_CTRL_RX_FIFO | RESET_CTRL_TX_FIFO | RESET_CTRL_RESP_QUEUE |
 			    RESET_CTRL_CMD_QUEUE,
-			    config->regs + RESET_CTRL);
-		sys_write32(sys_read32(config->regs + DEVICE_CTRL) | DEV_CTRL_RESUME,
-			    config->regs + DEVICE_CTRL);
+			    base + RESET_CTRL);
+		sys_write32(sys_read32(base + DEVICE_CTRL) | DEV_CTRL_RESUME,
+			    base + DEVICE_CTRL);
 	}
 	k_sem_give(&data->sem_xfer);
 }
@@ -697,7 +709,7 @@ static void dw_i3c_end_xfer(const struct device *dev)
  */
 static void start_xfer(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	struct dw_i3c_xfer *xfer = &data->xfer;
 	struct dw_i3c_cmd *cmd;
@@ -713,19 +725,19 @@ static void start_xfer(const struct device *dev)
 		}
 	}
 
-	thld_ctrl = sys_read32(config->regs + QUEUE_THLD_CTRL);
+	thld_ctrl = sys_read32(base + QUEUE_THLD_CTRL);
 	thld_ctrl &= ~QUEUE_THLD_CTRL_RESP_BUF_MASK;
 	thld_ctrl |= QUEUE_THLD_CTRL_RESP_BUF(xfer->ncmds);
-	sys_write32(thld_ctrl, config->regs + QUEUE_THLD_CTRL);
+	sys_write32(thld_ctrl, base + QUEUE_THLD_CTRL);
 
 	/* Enqueue CMD */
 	for (i = 0; i < xfer->ncmds; i++) {
 		cmd = &xfer->cmds[i];
 		/* Only cmd_lo is used when it is a target */
 		if (dw_i3c_is_current_controller(dev)) {
-			sys_write32(cmd->cmd_hi, config->regs + COMMAND_QUEUE_PORT);
+			sys_write32(cmd->cmd_hi, base + COMMAND_QUEUE_PORT);
 		}
-		sys_write32(cmd->cmd_lo, config->regs + COMMAND_QUEUE_PORT);
+		sys_write32(cmd->cmd_lo, base + COMMAND_QUEUE_PORT);
 	}
 }
 #ifdef CONFIG_I3C_CONTROLLER
@@ -773,7 +785,7 @@ static int get_i3c_addr_pos(const struct device *dev, uint8_t addr, bool sa)
 static int dw_i3c_xfers(const struct device *dev, struct i3c_device_desc *target,
 			struct i3c_msg *msgs, uint8_t num_msgs)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	struct dw_i3c_xfer *xfer = &data->xfer;
 	int32_t ret, i, pos, nrxwords = 0, ntxwords = 0;
@@ -826,11 +838,11 @@ static int dw_i3c_xfers(const struct device *dev, struct i3c_device_desc *target
 		cmd->buf = msgs[i].buf;
 
 		if (msgs[i].flags & I3C_MSG_NBCH) {
-			sys_write32(sys_read32(config->regs + DEVICE_CTRL) & ~DEV_CTRL_IBA_INCLUDE,
-				    config->regs + DEVICE_CTRL);
+			sys_write32(sys_read32(base + DEVICE_CTRL) & ~DEV_CTRL_IBA_INCLUDE,
+				    base + DEVICE_CTRL);
 		} else {
-			sys_write32(sys_read32(config->regs + DEVICE_CTRL) | DEV_CTRL_IBA_INCLUDE,
-				    config->regs + DEVICE_CTRL);
+			sys_write32(sys_read32(base + DEVICE_CTRL) | DEV_CTRL_IBA_INCLUDE,
+				    base + DEVICE_CTRL);
 		}
 
 		if (msgs[i].flags & I3C_MSG_READ) {
@@ -950,7 +962,7 @@ error:
 
 static int dw_i3c_i2c_attach_device(const struct device *dev, struct i3c_i2c_device_desc *desc)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	uint8_t pos;
 
@@ -964,21 +976,21 @@ static int dw_i3c_i2c_attach_device(const struct device *dev, struct i3c_i2c_dev
 	data->free_pos &= ~BIT(pos);
 
 	sys_write32(DEV_ADDR_TABLE_LEGACY_I2C_DEV | DEV_ADDR_TABLE_STATIC_ADDR(desc->addr),
-		    config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
+		    base + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
 
 	return 0;
 }
 
 static void dw_i3c_i2c_detach_device(const struct device *dev, struct i3c_i2c_device_desc *desc)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	struct dw_i3c_i2c_dev_data *dw_i2c_device_data = desc->controller_priv;
 
 	__ASSERT_NO_MSG(dw_i2c_device_data != NULL);
 
 	sys_write32(0,
-		    config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, dw_i2c_device_data->id));
+		    base + DEV_ADDR_TABLE_LOC(data->datstartaddr, dw_i2c_device_data->id));
 	data->free_pos |= BIT(dw_i2c_device_data->id);
 	desc->controller_priv = NULL;
 }
@@ -998,7 +1010,7 @@ static void dw_i3c_i2c_detach_device(const struct device *dev, struct i3c_i2c_de
 static int dw_i3c_i2c_transfer(const struct device *dev, struct i3c_i2c_device_desc *target,
 			       struct i2c_msg *msgs, uint8_t num_msgs)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	struct dw_i3c_xfer *xfer = &data->xfer;
 	int32_t ret, i, pos, nrxwords = 0, ntxwords = 0;
@@ -1077,8 +1089,8 @@ static int dw_i3c_i2c_transfer(const struct device *dev, struct i3c_i2c_device_d
 	}
 
 	/* Do not send broadcast address (0x7E) with I2C transfers */
-	sys_write32(sys_read32(config->regs + DEVICE_CTRL) & ~DEV_CTRL_IBA_INCLUDE,
-		    config->regs + DEVICE_CTRL);
+	sys_write32(sys_read32(base + DEVICE_CTRL) & ~DEV_CTRL_IBA_INCLUDE,
+		    base + DEVICE_CTRL);
 
 	start_xfer(dev);
 
@@ -1151,8 +1163,8 @@ static int dw_i3c_i2c_api_transfer(const struct device *dev, struct i2c_msg *msg
 #ifdef CONFIG_I3C_CONTROLLER
 static int dw_i3c_controller_ibi_hj_response(const struct device *dev, bool ack)
 {
-	const struct dw_i3c_config *config = dev->config;
-	uint32_t ctrl = sys_read32(config->regs + DEVICE_CTRL);
+	const mem_addr_t base = dw_i3c_get_base(dev);
+	uint32_t ctrl = sys_read32(base + DEVICE_CTRL);
 
 	if (ack) {
 		ctrl &= ~DEV_CTRL_HOT_JOIN_NACK;
@@ -1160,7 +1172,7 @@ static int dw_i3c_controller_ibi_hj_response(const struct device *dev, bool ack)
 		ctrl |= DEV_CTRL_HOT_JOIN_NACK;
 	}
 
-	sys_write32(ctrl, config->regs + DEVICE_CTRL);
+	sys_write32(ctrl, base + DEVICE_CTRL);
 
 	return 0;
 }
@@ -1168,7 +1180,7 @@ static int dw_i3c_controller_ibi_hj_response(const struct device *dev, bool ack)
 static int dw_i3c_controller_ibi_crr_response(struct i3c_device_desc *target, bool ack)
 {
 	const struct device *dev = target->bus;
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	int pos;
 	uint32_t reg;
@@ -1178,13 +1190,13 @@ static int dw_i3c_controller_ibi_crr_response(struct i3c_device_desc *target, bo
 		return pos;
 	}
 
-	reg = sys_read32(config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
+	reg = sys_read32(base + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
 	if (ack) {
 		reg &= ~DEV_ADDR_TABLE_MR_REJECT;
 	} else {
 		reg |= DEV_ADDR_TABLE_MR_REJECT;
 	}
-	sys_write32(reg, config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
+	sys_write32(reg, base + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
 
 	return 0;
 }
@@ -1192,7 +1204,7 @@ static int dw_i3c_controller_ibi_crr_response(struct i3c_device_desc *target, bo
 static int i3c_dw_endis_ibi(const struct device *dev, struct i3c_device_desc *target, bool en)
 {
 	struct dw_i3c_data *data = dev->data;
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	uint32_t bitpos, sir_con;
 	struct i3c_ccc_events i3c_events;
 	int ret;
@@ -1204,7 +1216,7 @@ static int i3c_dw_endis_ibi(const struct device *dev, struct i3c_device_desc *ta
 		return pos;
 	}
 
-	uint32_t reg = sys_read32(config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
+	uint32_t reg = sys_read32(base + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
 
 	if (i3c_ibi_has_payload(target)) {
 		reg |= DEV_ADDR_TABLE_IBI_WITH_DATA;
@@ -1216,9 +1228,9 @@ static int i3c_dw_endis_ibi(const struct device *dev, struct i3c_device_desc *ta
 	} else {
 		reg |= DEV_ADDR_TABLE_SIR_REJECT;
 	}
-	sys_write32(reg, config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
+	sys_write32(reg, base + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
 
-	sir_con = sys_read32(config->regs + IBI_SIR_REQ_REJECT);
+	sir_con = sys_read32(base + IBI_SIR_REQ_REJECT);
 	/* TODO: what is this macro doing?? */
 	bitpos = IBI_SIR_REQ_ID(target->dynamic_addr);
 
@@ -1227,7 +1239,7 @@ static int i3c_dw_endis_ibi(const struct device *dev, struct i3c_device_desc *ta
 	} else {
 		sir_con |= BIT(bitpos);
 	}
-	sys_write32(sir_con, config->regs + IBI_SIR_REQ_REJECT);
+	sys_write32(sir_con, base + IBI_SIR_REQ_REJECT);
 
 	/* Tell target to enable IBI */
 	i3c_events.events = I3C_CCC_EVT_INTR;
@@ -1316,14 +1328,14 @@ static void dw_i3c_handle_mr(const struct device *dev, uint32_t ibi_status)
 
 static void ibis_handle(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	uint32_t nibis, ibi_stat;
 	int32_t i;
 
-	nibis = sys_read32(config->regs + QUEUE_STATUS_LEVEL);
+	nibis = sys_read32(base + QUEUE_STATUS_LEVEL);
 	nibis = QUEUE_STATUS_IBI_BUF_BLR(nibis);
 	for (i = 0; i < nibis; i++) {
-		ibi_stat = sys_read32(config->regs + IBI_QUEUE_STATUS);
+		ibi_stat = sys_read32(base + IBI_QUEUE_STATUS);
 		if (IBI_TYPE_SIRQ(ibi_stat)) {
 			dw_i3c_handle_tir(dev, ibi_stat);
 		} else if (IBI_TYPE_HJ(ibi_stat)) {
@@ -1339,20 +1351,20 @@ static void ibis_handle(const struct device *dev)
 #ifdef CONFIG_I3C_TARGET
 static int dw_i3c_target_ibi_raise_hj(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	int ret;
 
-	if (!(sys_read32(config->regs + HW_CAPABILITY) & HW_CAPABILITY_SLV_HJ_CAP)) {
+	if (!(sys_read32(base + HW_CAPABILITY) & HW_CAPABILITY_SLV_HJ_CAP)) {
 		LOG_ERR("%s: HJ not supported", dev->name);
 		return -ENOTSUP;
 	}
-	if (sys_read32(config->regs + DEVICE_ADDR) & DEVICE_ADDR_DYNAMIC_ADDR_VALID) {
+	if (sys_read32(base + DEVICE_ADDR) & DEVICE_ADDR_DYNAMIC_ADDR_VALID) {
 		LOG_ERR("%s: HJ not available, DA already assigned", dev->name);
 		return -EACCES;
 	}
 	/* if this is set, then it is assumed it is already trying */
-	if ((sys_read32(config->regs + SLV_EVENT_STATUS) & SLV_EVENT_STATUS_HJ_EN)) {
+	if ((sys_read32(base + SLV_EVENT_STATUS) & SLV_EVENT_STATUS_HJ_EN)) {
 		LOG_ERR("%s: HJ requests are currently disabled by DISEC", dev->name);
 		return -EAGAIN;
 	}
@@ -1367,8 +1379,8 @@ static int dw_i3c_target_ibi_raise_hj(const struct device *dev)
 	 */
 
 	/* enable HJ */
-	sys_write32(sys_read32(config->regs + SLV_EVENT_STATUS) | SLV_EVENT_STATUS_HJ_EN,
-		    config->regs + SLV_EVENT_STATUS);
+	sys_write32(sys_read32(base + SLV_EVENT_STATUS) | SLV_EVENT_STATUS_HJ_EN,
+		    base + SLV_EVENT_STATUS);
 
 	ret = k_sem_take(&data->sem_hj, K_MSEC(CONFIG_I3C_DW_RW_TIMEOUT_MS));
 	if (ret) {
@@ -1380,28 +1392,28 @@ static int dw_i3c_target_ibi_raise_hj(const struct device *dev)
 
 static int dw_i3c_target_ibi_raise_tir(const struct device *dev, struct i3c_ibi *request)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	int status;
 	uint32_t slv_intr_req, slv_ibi_resp;
 
-	if (!(sys_read32(config->regs + HW_CAPABILITY) & HW_CAPABILITY_SLV_IBI_CAP)) {
+	if (!(sys_read32(base + HW_CAPABILITY) & HW_CAPABILITY_SLV_IBI_CAP)) {
 		LOG_ERR("%s: IBI TIR not supported", dev->name);
 		return -ENOTSUP;
 	}
 
-	if (!(sys_read32(config->regs + DEVICE_ADDR) & DEVICE_ADDR_DYNAMIC_ADDR_VALID)) {
+	if (!(sys_read32(base + DEVICE_ADDR) & DEVICE_ADDR_DYNAMIC_ADDR_VALID)) {
 		LOG_ERR("%s: IBI TIR not available, DA not assigned", dev->name);
 		return -EACCES;
 	}
 
-	if (!(sys_read32(config->regs + SLV_EVENT_STATUS) & SLV_EVENT_STATUS_SIR_EN)) {
+	if (!(sys_read32(base + SLV_EVENT_STATUS) & SLV_EVENT_STATUS_SIR_EN)) {
 		LOG_ERR("%s: IBI TIR requests are currently disabled by DISEC", dev->name);
 		return -EAGAIN;
 	}
 
-	slv_intr_req = sys_read32(config->regs + SLV_INTR_REQ);
-	if (sys_read32(config->regs + SLV_CHAR_CTRL) & SLV_CHAR_CTRL_IBI_PAYLOAD) {
+	slv_intr_req = sys_read32(base + SLV_INTR_REQ);
+	if (sys_read32(base + SLV_CHAR_CTRL) & SLV_CHAR_CTRL_IBI_PAYLOAD) {
 		uint32_t tir_data = 0;
 
 		/* max support length is DA + MDB (1 byte) + 4 data bytes, MDB must be at least
@@ -1424,12 +1436,12 @@ static int dw_i3c_target_ibi_raise_tir(const struct device *dev, struct i3c_ibi 
 			SLV_SIR_DATA_BYTE2((request->payload_len > 3) ? request->payload[3] : 0);
 		tir_data |=
 			SLV_SIR_DATA_BYTE3((request->payload_len > 4) ? request->payload[4] : 0);
-		sys_write32(tir_data, config->regs + SLV_SIR_DATA);
+		sys_write32(tir_data, base + SLV_SIR_DATA);
 	}
 
 	/* kick off the ibi tir request */
 	slv_intr_req |= SLV_INTR_REQ_SIR;
-	sys_write32(slv_intr_req, config->regs + SLV_INTR_REQ);
+	sys_write32(slv_intr_req, base + SLV_INTR_REQ);
 
 	/* wait for SLV_IBI_RESP update */
 	status = k_sem_take(&data->ibi_sts_sem, K_MSEC(100));
@@ -1437,7 +1449,7 @@ static int dw_i3c_target_ibi_raise_tir(const struct device *dev, struct i3c_ibi 
 		return -ETIMEDOUT;
 	}
 
-	slv_ibi_resp = sys_read32(config->regs + SLV_IBI_RESP);
+	slv_ibi_resp = sys_read32(base + SLV_IBI_RESP);
 	switch (SLV_IBI_RESP_IBI_STS(slv_ibi_resp)) {
 	case SLV_IBI_RESP_IBI_STS_ACK:
 		LOG_DBG("%s: Controller ACKed IBI TIR", dev->name);
@@ -1456,34 +1468,34 @@ static int dw_i3c_target_ibi_raise_tir(const struct device *dev, struct i3c_ibi 
 
 static int dw_i3c_target_ibi_raise_mr(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	int ret;
 
-	if (!(sys_read32(config->regs + HW_CAPABILITY) & HW_CAPABILITY_SLV_IBI_CAP)) {
+	if (!(sys_read32(base + HW_CAPABILITY) & HW_CAPABILITY_SLV_IBI_CAP)) {
 		LOG_ERR("%s: IBI not supported by HW", dev->name);
 		return -ENOTSUP;
 	}
 
-	if (!(sys_read32(config->regs + DEVICE_ADDR) & DEVICE_ADDR_DYNAMIC_ADDR_VALID)) {
+	if (!(sys_read32(base + DEVICE_ADDR) & DEVICE_ADDR_DYNAMIC_ADDR_VALID)) {
 		LOG_ERR("%s: MR not available, DA not assigned", dev->name);
 		return -EACCES;
 	}
 
-	if (!(sys_read32(config->regs + SLV_EVENT_STATUS) & SLV_EVENT_STATUS_MR_EN)) {
+	if (!(sys_read32(base + SLV_EVENT_STATUS) & SLV_EVENT_STATUS_MR_EN)) {
 		LOG_ERR("%s: MR requests are currently disabled by DISEC", dev->name);
 		return -EAGAIN;
 	}
 
-	sys_write32(sys_read32(config->regs + SLV_INTR_REQ) | SLV_INTR_REQ_MR,
-		    config->regs + SLV_INTR_REQ);
+	sys_write32(sys_read32(base + SLV_INTR_REQ) | SLV_INTR_REQ_MR,
+		    base + SLV_INTR_REQ);
 
 	ret = k_sem_take(&data->ibi_sts_sem, K_MSEC(CONFIG_I3C_DW_RW_TIMEOUT_MS));
 	if (ret) {
 		return -ETIMEDOUT;
 	}
 
-	uint32_t slv_ibi_resp = sys_read32(config->regs + SLV_IBI_RESP);
+	uint32_t slv_ibi_resp = sys_read32(base + SLV_IBI_RESP);
 
 	switch (SLV_IBI_RESP_IBI_STS(slv_ibi_resp)) {
 	case SLV_IBI_RESP_IBI_STS_ACK:
@@ -1519,17 +1531,17 @@ static int dw_i3c_target_ibi_raise(const struct device *dev, struct i3c_ibi *req
 #if defined(CONFIG_I3C_CONTROLLER) && defined(CONFIG_I3C_TARGET)
 static void dw_i3c_role_switch_resume(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 
 	sys_write32(RESET_CTRL_RX_FIFO | RESET_CTRL_TX_FIFO | RESET_CTRL_CMD_QUEUE,
-		    config->regs + RESET_CTRL);
-	sys_write32(sys_read32(config->regs + DEVICE_CTRL) | DEV_CTRL_RESUME,
-		    config->regs + DEVICE_CTRL);
+		    base + RESET_CTRL);
+	sys_write32(sys_read32(base + DEVICE_CTRL) | DEV_CTRL_RESUME,
+		    base + DEVICE_CTRL);
 }
 
 static void dw_i3c_update_interrupt_mask(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	uint32_t intr_mask;
 
 	if (dw_i3c_is_current_controller(dev)) {
@@ -1538,27 +1550,27 @@ static void dw_i3c_update_interrupt_mask(const struct device *dev)
 		intr_mask = INTR_SLAVE_MASK | INTR_BUSOWNER_UPDATE_STAT;
 	}
 
-	sys_write32(INTR_ALL, config->regs + INTR_STATUS);
-	sys_write32(intr_mask, config->regs + INTR_STATUS_EN);
-	sys_write32(intr_mask, config->regs + INTR_SIGNAL_EN);
+	sys_write32(INTR_ALL, base + INTR_STATUS);
+	sys_write32(intr_mask, base + INTR_STATUS_EN);
+	sys_write32(intr_mask, base + INTR_SIGNAL_EN);
 }
 #endif /* CONFIG_I3C_CONTROLLER && CONFIG_I3C_TARGET */
 #endif /* CONFIG_I3C_USE_IBI */
 
 static int i3c_dw_irq(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	uint32_t status;
 #ifdef CONFIG_I3C_TARGET
 	struct dw_i3c_data *data = dev->data;
 #endif /* CONFIG_I3C_TARGET */
 
-	status = sys_read32(config->regs + INTR_STATUS);
+	status = sys_read32(base + INTR_STATUS);
 	if (status & (INTR_TRANSFER_ERR_STAT | INTR_RESP_READY_STAT)) {
 		dw_i3c_end_xfer(dev);
 
 		if (status & INTR_TRANSFER_ERR_STAT) {
-			sys_write32(INTR_TRANSFER_ERR_STAT, config->regs + INTR_STATUS);
+			sys_write32(INTR_TRANSFER_ERR_STAT, base + INTR_STATUS);
 		}
 	}
 #ifdef CONFIG_I3C_CONTROLLER
@@ -1580,18 +1592,18 @@ static int i3c_dw_irq(const struct device *dev)
 				/* Inform app so that it can send data. */
 				target_cb->read_requested_cb(data->target_config, NULL);
 			}
-			sys_write32(INTR_READ_REQ_RECV_STAT, config->regs + INTR_STATUS);
+			sys_write32(INTR_READ_REQ_RECV_STAT, base + INTR_STATUS);
 		}
 #ifdef CONFIG_I3C_USE_IBI
 		/* IBI TIR request register is addressed and status is updated*/
 		if (status & INTR_IBI_UPDATED_STAT) {
 			k_sem_give(&data->ibi_sts_sem);
-			sys_write32(INTR_IBI_UPDATED_STAT, config->regs + INTR_STATUS);
+			sys_write32(INTR_IBI_UPDATED_STAT, base + INTR_STATUS);
 		}
 		/* DA has been assigned, could happen after a IBI HJ request */
 		if (status & INTR_DYN_ADDR_ASSGN_STAT) {
 			k_sem_give(&data->sem_hj);
-			sys_write32(INTR_DYN_ADDR_ASSGN_STAT, config->regs + INTR_STATUS);
+			sys_write32(INTR_DYN_ADDR_ASSGN_STAT, base + INTR_STATUS);
 		}
 #endif /* CONFIG_I3C_USE_IBI */
 	}
@@ -1612,7 +1624,7 @@ static int i3c_dw_irq(const struct device *dev)
 			}
 		}
 
-		sys_write32(INTR_BUSOWNER_UPDATE_STAT, config->regs + INTR_STATUS);
+		sys_write32(INTR_BUSOWNER_UPDATE_STAT, base + INTR_STATUS);
 	}
 #endif /* CONFIG_I3C_CONTROLLER && CONFIG_I3C_TARGET && CONFIG_I3C_USE_IBI */
 
@@ -1641,7 +1653,7 @@ static bool i3c_any_i2c_fast_mode(const struct i3c_dev_list *dev_list)
 
 static int dw_i3c_init_scl_timing(const struct device *dev, struct i3c_config_controller *ctrl_cfg)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	uint32_t core_rate, scl_timing;
 #ifdef CONFIG_I3C_CONTROLLER
 	struct dw_i3c_data *data = dev->data;
@@ -1670,7 +1682,7 @@ static int dw_i3c_init_scl_timing(const struct device *dev, struct i3c_config_co
 	lcnt = CLAMP(lcnt, SCL_I3C_TIMING_CNT_MIN, SCL_I3C_TIMING_CNT_MAX);
 
 	scl_timing = SCL_I3C_TIMING_HCNT(hcnt) | SCL_I3C_TIMING_LCNT(lcnt);
-	sys_write32(scl_timing, config->regs + SCL_I3C_OD_TIMING);
+	sys_write32(scl_timing, base + SCL_I3C_OD_TIMING);
 
 	/* I3C_PP */
 	hcnt = DIV_ROUND_UP(I3C_BUS_THIGH_MAX_NS * (uint64_t)core_rate, I3C_PERIOD_NS) - 1;
@@ -1680,7 +1692,7 @@ static int dw_i3c_init_scl_timing(const struct device *dev, struct i3c_config_co
 	lcnt = CLAMP(lcnt, SCL_I3C_TIMING_CNT_MIN, SCL_I3C_TIMING_CNT_MAX);
 
 	scl_timing = SCL_I3C_TIMING_HCNT(hcnt) | SCL_I3C_TIMING_LCNT(lcnt);
-	sys_write32(scl_timing, config->regs + SCL_I3C_PP_TIMING);
+	sys_write32(scl_timing, base + SCL_I3C_PP_TIMING);
 
 	/* I3C */
 	lcnt = DIV_ROUND_UP(core_rate, I3C_BUS_SDR1_SCL_RATE) - hcnt;
@@ -1691,19 +1703,19 @@ static int dw_i3c_init_scl_timing(const struct device *dev, struct i3c_config_co
 	scl_timing |= SCL_EXT_LCNT_3(lcnt);
 	lcnt = DIV_ROUND_UP(core_rate, I3C_BUS_SDR4_SCL_RATE) - hcnt;
 	scl_timing |= SCL_EXT_LCNT_4(lcnt);
-	sys_write32(scl_timing, config->regs + SCL_EXT_LCNT_TIMING);
+	sys_write32(scl_timing, base + SCL_EXT_LCNT_TIMING);
 
 	/* I2C FM+ */
 	fmplcnt = DIV_ROUND_UP(I3C_BUS_I2C_FMP_TLOW_MIN_NS * (uint64_t)core_rate, I3C_PERIOD_NS);
 	hcnt = DIV_ROUND_UP(core_rate, I3C_BUS_I2C_FM_PLUS_SCL_RATE) - fmplcnt;
 	scl_timing = SCL_I2C_FMP_TIMING_HCNT(hcnt) | SCL_I2C_FMP_TIMING_LCNT(fmplcnt);
-	sys_write32(scl_timing, config->regs + SCL_I2C_FMP_TIMING);
+	sys_write32(scl_timing, base + SCL_I2C_FMP_TIMING);
 
 	/* I2C FM */
 	fmlcnt = DIV_ROUND_UP(I3C_BUS_I2C_FM_TLOW_MIN_NS * (uint64_t)core_rate, I3C_PERIOD_NS);
 	hcnt = DIV_ROUND_UP(core_rate, I3C_BUS_I2C_FM_SCL_RATE) - fmlcnt;
 	scl_timing = SCL_I2C_FM_TIMING_HCNT(hcnt) | SCL_I2C_FM_TIMING_LCNT(fmlcnt);
-	sys_write32(scl_timing, config->regs + SCL_I2C_FM_TIMING);
+	sys_write32(scl_timing, base + SCL_I2C_FM_TIMING);
 
 	if (data->mode != I3C_BUS_MODE_PURE) {
 		/*
@@ -1714,27 +1726,27 @@ static int dw_i3c_init_scl_timing(const struct device *dev, struct i3c_config_co
 		sys_write32(BUS_I3C_MST_FREE(i3c_any_i2c_fast_mode(&config->common.dev_list)
 						     ? fmlcnt
 						     : fmplcnt),
-			    config->regs + BUS_FREE_TIMING);
-		sys_write32(sys_read32(config->regs + DEVICE_CTRL) | DEV_CTRL_I2C_SLAVE_PRESENT,
-			    config->regs + DEVICE_CTRL);
+			    base + BUS_FREE_TIMING);
+		sys_write32(sys_read32(base + DEVICE_CTRL) | DEV_CTRL_I2C_SLAVE_PRESENT,
+			    base + DEVICE_CTRL);
 	} else {
 		/* Pure bus: Set bus free timing to t_cas of 38.4ns */
 		free_cnt = DIV_ROUND_UP(I3C_BUS_TCAS_PS * (uint64_t)core_rate, I3C_PERIOD_PS);
-		sys_write32(BUS_I3C_MST_FREE(free_cnt), config->regs + BUS_FREE_TIMING);
-		sys_write32(sys_read32(config->regs + DEVICE_CTRL) & ~DEV_CTRL_I2C_SLAVE_PRESENT,
-			    config->regs + DEVICE_CTRL);
+		sys_write32(BUS_I3C_MST_FREE(free_cnt), base + BUS_FREE_TIMING);
+		sys_write32(sys_read32(base + DEVICE_CTRL) & ~DEV_CTRL_I2C_SLAVE_PRESENT,
+			    base + DEVICE_CTRL);
 	}
 #endif /* CONFIG_I3C_CONTROLLER */
 #ifdef CONFIG_I3C_TARGET
 	/* I3C Bus Available Time */
 	scl_timing = DIV_ROUND_UP(I3C_BUS_AVAILABLE_TIME_NS * (uint64_t)core_rate,
 					I3C_PERIOD_NS);
-	sys_write32(BUS_I3C_AVAIL_TIME(scl_timing), config->regs + BUS_FREE_TIMING);
+	sys_write32(BUS_I3C_AVAIL_TIME(scl_timing), base + BUS_FREE_TIMING);
 
 	/* I3C Bus Idle Time */
 	scl_timing =
 		DIV_ROUND_UP(I3C_BUS_IDLE_TIME_NS * (uint64_t)core_rate, I3C_PERIOD_NS);
-	sys_write32(BUS_I3C_IDLE_TIME(scl_timing), config->regs + BUS_IDLE_TIMING);
+	sys_write32(BUS_I3C_IDLE_TIME(scl_timing), base + BUS_IDLE_TIMING);
 #endif /* CONFIG_I3C_TARGET */
 
 	return 0;
@@ -1743,7 +1755,7 @@ static int dw_i3c_init_scl_timing(const struct device *dev, struct i3c_config_co
 #ifdef CONFIG_I3C_CONTROLLER
 static int dw_i3c_attach_device(const struct device *dev, struct i3c_device_desc *desc)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	uint8_t pos = get_free_pos(data->free_pos);
 	uint8_t addr = desc->dynamic_addr ? desc->dynamic_addr : desc->static_addr;
@@ -1760,7 +1772,7 @@ static int dw_i3c_attach_device(const struct device *dev, struct i3c_device_desc
 	LOG_DBG("%s: Attaching %s", dev->name, desc->dev->name);
 
 	sys_write32(DEV_ADDR_TABLE_DYNAMIC_ADDR(addr),
-		    config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
+		    base + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
 
 	return 0;
 }
@@ -1770,7 +1782,7 @@ static int dw_i3c_reattach_device(const struct device *dev, struct i3c_device_de
 {
 	ARG_UNUSED(old_dyn_addr);
 
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	struct dw_i3c_i2c_dev_data *dw_i3c_device_data = desc->controller_priv;
 	uint32_t dat;
@@ -1783,18 +1795,18 @@ static int dw_i3c_reattach_device(const struct device *dev, struct i3c_device_de
 
 	LOG_DBG("Reattaching %s", desc->dev->name);
 
-	dat = sys_read32(config->regs +
+	dat = sys_read32(base +
 			 DEV_ADDR_TABLE_LOC(data->datstartaddr, dw_i3c_device_data->id));
 	dat &= ~DEV_ADDR_TABLE_DYNAMIC_ADDR_MASK;
 	sys_write32(DEV_ADDR_TABLE_DYNAMIC_ADDR(desc->dynamic_addr) | dat,
-		    config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, dw_i3c_device_data->id));
+		    base + DEV_ADDR_TABLE_LOC(data->datstartaddr, dw_i3c_device_data->id));
 
 	return 0;
 }
 
 static int dw_i3c_detach_device(const struct device *dev, struct i3c_device_desc *desc)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	struct dw_i3c_i2c_dev_data *dw_i3c_device_data = desc->controller_priv;
 
@@ -1806,7 +1818,7 @@ static int dw_i3c_detach_device(const struct device *dev, struct i3c_device_desc
 	LOG_DBG("%s: Detaching %s", dev->name, desc->dev->name);
 
 	sys_write32(0,
-		    config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, dw_i3c_device_data->id));
+		    base + DEV_ADDR_TABLE_LOC(data->datstartaddr, dw_i3c_device_data->id));
 	data->free_pos |= BIT(dw_i3c_device_data->id);
 	desc->controller_priv = NULL;
 
@@ -1815,7 +1827,7 @@ static int dw_i3c_detach_device(const struct device *dev, struct i3c_device_desc
 
 static int set_controller_info(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	uint8_t controller_da;
 
@@ -1835,7 +1847,7 @@ static int set_controller_info(const struct device *dev)
 	}
 
 	sys_write32(DEVICE_ADDR_DYNAMIC_ADDR_VALID | DEVICE_ADDR_DYNAMIC(controller_da),
-		    config->regs + DEVICE_ADDR);
+		    base + DEVICE_ADDR);
 	/* Mark the address as I3C device */
 	i3c_addr_slots_mark_i3c(&data->common.attached_dev.addr_slots, controller_da);
 
@@ -1845,20 +1857,20 @@ static int set_controller_info(const struct device *dev)
 
 static void enable_interrupts(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	uint32_t thld_ctrl, intr_mask;
 
 	config->irq_config_func();
 
-	thld_ctrl = sys_read32(config->regs + QUEUE_THLD_CTRL);
+	thld_ctrl = sys_read32(base + QUEUE_THLD_CTRL);
 	thld_ctrl &= (~QUEUE_THLD_CTRL_RESP_BUF_MASK & ~QUEUE_THLD_CTRL_IBI_STS_MASK);
-	sys_write32(thld_ctrl, config->regs + QUEUE_THLD_CTRL);
+	sys_write32(thld_ctrl, base + QUEUE_THLD_CTRL);
 
-	thld_ctrl = sys_read32(config->regs + DATA_BUFFER_THLD_CTRL);
+	thld_ctrl = sys_read32(base + DATA_BUFFER_THLD_CTRL);
 	thld_ctrl &= ~DATA_BUFFER_THLD_CTRL_RX_BUF;
-	sys_write32(thld_ctrl, config->regs + DATA_BUFFER_THLD_CTRL);
+	sys_write32(thld_ctrl, base + DATA_BUFFER_THLD_CTRL);
 
-	sys_write32(INTR_ALL, config->regs + INTR_STATUS);
+	sys_write32(INTR_ALL, base + INTR_STATUS);
 
 	/* Enable interrupts */
 #if defined(CONFIG_I3C_CONTROLLER) && defined(CONFIG_I3C_TARGET)
@@ -1871,8 +1883,8 @@ static void enable_interrupts(const struct device *dev)
 #elif defined(CONFIG_I3C_TARGET)
 	intr_mask = INTR_SLAVE_MASK;
 #endif
-	sys_write32(intr_mask, config->regs + INTR_STATUS_EN);
-	sys_write32(intr_mask, config->regs + INTR_SIGNAL_EN);
+	sys_write32(intr_mask, base + INTR_STATUS_EN);
+	sys_write32(intr_mask, base + INTR_SIGNAL_EN);
 }
 #ifdef CONFIG_I3C_CONTROLLER
 /**
@@ -2036,23 +2048,23 @@ error:
  */
 static int add_slave_from_daa(const struct device *dev, int32_t pos)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	uint32_t tmp;
 	uint64_t pid;
 	uint8_t dyn_addr;
 
 	/* retrieve dynamic address assigned */
-	tmp = sys_read32(config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
+	tmp = sys_read32(base + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
 	dyn_addr = (((tmp) & GENMASK(22, 16)) >> 16);
 
 	/* retrieve pid */
-	tmp = sys_read32(config->regs + DEV_CHAR_TABLE_LOC1(data->dctstartaddr, pos));
+	tmp = sys_read32(base + DEV_CHAR_TABLE_LOC1(data->dctstartaddr, pos));
 	pid = ((uint64_t)DEV_CHAR_TABLE_MSB_PID(tmp) << 16) + (DEV_CHAR_TABLE_LSB_PID(tmp) << 16);
-	tmp = sys_read32(config->regs + DEV_CHAR_TABLE_LOC2(data->dctstartaddr, pos));
+	tmp = sys_read32(base + DEV_CHAR_TABLE_LOC2(data->dctstartaddr, pos));
 	pid |= DEV_CHAR_TABLE_LSB_PID(tmp);
 
-	tmp = sys_read32(config->regs + DEV_CHAR_TABLE_LOC3(data->dctstartaddr, pos));
+	tmp = sys_read32(base + DEV_CHAR_TABLE_LOC3(data->dctstartaddr, pos));
 	uint8_t bcr = DEV_CHAR_TABLE_BCR(tmp);
 	uint8_t dcr = DEV_CHAR_TABLE_DCR(tmp);
 
@@ -2105,7 +2117,7 @@ static int add_slave_from_daa(const struct device *dev, int32_t pos)
  */
 static int dw_i3c_do_daa(const struct device *dev)
 {
-	const struct dw_i3c_config *config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	struct dw_i3c_data *data = dev->data;
 	struct dw_i3c_xfer *xfer = &data->xfer;
 	struct dw_i3c_cmd *cmd;
@@ -2135,7 +2147,7 @@ static int dw_i3c_do_daa(const struct device *dev)
 		last_addr = addr;
 		addr |= (p << 7);
 		sys_write32(DEV_ADDR_TABLE_DYNAMIC_ADDR(addr),
-			    config->regs + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
+			    base + DEV_ADDR_TABLE_LOC(data->datstartaddr, pos));
 	}
 
 	pos = get_free_pos(data->free_pos);
@@ -2192,9 +2204,10 @@ static int dw_i3c_do_daa(const struct device *dev)
 }
 #endif /* CONFIG_I3C_CONTROLLER */
 
-static void dw_i3c_enable_controller(const struct dw_i3c_config *config, bool enable)
+static void dw_i3c_enable_controller(const struct device *dev, bool enable)
 {
-	uint32_t reg = sys_read32(config->regs + DEVICE_CTRL);
+	const mem_addr_t base = dw_i3c_get_base(dev);
+	uint32_t reg = sys_read32(base + DEVICE_CTRL);
 
 	if (enable) {
 		reg |= DEV_CTRL_ENABLE;
@@ -2202,7 +2215,7 @@ static void dw_i3c_enable_controller(const struct dw_i3c_config *config, bool en
 		reg &= ~DEV_CTRL_ENABLE;
 	}
 
-	sys_write32(reg, config->regs + DEVICE_CTRL);
+	sys_write32(reg, base + DEVICE_CTRL);
 }
 
 /**
@@ -2228,7 +2241,7 @@ static void dw_i3c_enable_controller(const struct dw_i3c_config *config, bool en
 static int dw_i3c_config_get(const struct device *dev, enum i3c_config_type type, void *config)
 {
 #ifdef CONFIG_I3C_TARGET
-	const struct dw_i3c_config *dev_config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 #endif /* CONFIG_I3C_TARGET */
 #ifdef CONFIG_I3C_CONTROLLER
 	struct dw_i3c_data *data = dev->data;
@@ -2246,26 +2259,26 @@ static int dw_i3c_config_get(const struct device *dev, enum i3c_config_type type
 		struct i3c_config_target *target_config = config;
 		uint32_t reg;
 
-		reg = sys_read32(dev_config->regs + SLV_MAX_LEN);
+		reg = sys_read32(base + SLV_MAX_LEN);
 		target_config->max_read_len = SLV_MAX_LEN_MRL(reg);
 		target_config->max_write_len = SLV_MAX_LEN_MWL(reg);
 
-		reg = sys_read32(dev_config->regs + DEVICE_ADDR);
+		reg = sys_read32(base + DEVICE_ADDR);
 		if (reg & DEVICE_ADDR_STATIC_ADDR_VALID) {
 			target_config->static_addr = DEVICE_ADDR_STATIC(reg);
 		} else {
 			target_config->static_addr = 0x00;
 		}
 
-		reg = sys_read32(dev_config->regs + SLV_CHAR_CTRL);
+		reg = sys_read32(base + SLV_CHAR_CTRL);
 		target_config->bcr = SLV_CHAR_CTRL_BCR(reg);
 		target_config->dcr = SLV_CHAR_CTRL_DCR(reg);
 		target_config->supported_hdr = SLV_CHAR_CTRL_HDR_CAP(reg);
 
-		reg = sys_read32(dev_config->regs + SLV_MIPI_ID_VALUE);
+		reg = sys_read32(base + SLV_MIPI_ID_VALUE);
 		target_config->pid = ((uint64_t)reg) << 32;
 		target_config->pid_random = (bool)!!(reg & SLV_MIPI_ID_VALUE_SLV_PROV_ID_SEL);
-		reg = sys_read32(dev_config->regs + SLV_PID_VALUE);
+		reg = sys_read32(base + SLV_PID_VALUE);
 		target_config->pid |= reg;
 
 		target_config->enabled = !dw_i3c_is_current_controller(dev);
@@ -2299,7 +2312,7 @@ static int dw_i3c_configure(const struct device *dev, enum i3c_config_type type,
 	int ret;
 #endif /* CONFIG_I3C_CONTROLLER */
 #ifdef CONFIG_I3C_TARGET
-	const struct dw_i3c_config *dev_config = dev->config;
+	const mem_addr_t base = dw_i3c_get_base(dev);
 #endif /* CONFIG_I3C_TARGET */
 
 	if (type == I3C_CONFIG_CONTROLLER) {
@@ -2325,10 +2338,10 @@ static int dw_i3c_configure(const struct device *dev, enum i3c_config_type type,
 
 		val = SLV_MAX_LEN_MWL(target_cfg->max_write_len) |
 		      (SLV_MAX_LEN_MRL(target_cfg->max_read_len) << 16);
-		sys_write32(val, dev_config->regs + SLV_MAX_LEN);
+		sys_write32(val, base + SLV_MAX_LEN);
 
 		/* set static address */
-		val = sys_read32(dev_config->regs + DEVICE_ADDR);
+		val = sys_read32(base + DEVICE_ADDR);
 		/* if static address is set to 0x00, then disable static_addr_en */
 		if (target_cfg->static_addr != 0x00) {
 			val |= DEVICE_ADDR_STATIC_ADDR_VALID;
@@ -2337,9 +2350,9 @@ static int dw_i3c_configure(const struct device *dev, enum i3c_config_type type,
 		}
 		val &= ~DEVICE_ADDR_STATIC_MASK;
 		val |= DEVICE_ADDR_STATIC(target_cfg->static_addr);
-		sys_write32(val, dev_config->regs + DEVICE_ADDR);
+		sys_write32(val, base + DEVICE_ADDR);
 
-		val = sys_read32(dev_config->regs + SLV_CHAR_CTRL);
+		val = sys_read32(base + SLV_CHAR_CTRL);
 		val &= ~(SLV_CHAR_CTRL_BCR_MASK | SLV_CHAR_CTRL_DCR_MASK);
 		/* Bridge identifier, offline capable, ibi_payload, ibi_request_capable can not be
 		 * written to in bcr
@@ -2347,16 +2360,16 @@ static int dw_i3c_configure(const struct device *dev, enum i3c_config_type type,
 		val |= SLV_CHAR_CTRL_BCR(target_cfg->bcr);
 		val |= SLV_CHAR_CTRL_DCR(target_cfg->dcr) << 8;
 		/* HDR CAPs is not settable */
-		sys_write32(val, dev_config->regs + SLV_CHAR_CTRL);
+		sys_write32(val, base + SLV_CHAR_CTRL);
 
-		val = sys_read32(dev_config->regs + SLV_MIPI_ID_VALUE);
+		val = sys_read32(base + SLV_MIPI_ID_VALUE);
 		val &= ~(SLV_MIPI_ID_VALUE_SLV_MIPI_MFG_ID_MASK |
 			 SLV_MIPI_ID_VALUE_SLV_PROV_ID_SEL);
 		val |= (uint32_t)(target_cfg->pid >> 16);
-		sys_write32(val, dev_config->regs + SLV_MIPI_ID_VALUE);
+		sys_write32(val, base + SLV_MIPI_ID_VALUE);
 
 		val = (uint32_t)(target_cfg->pid & 0xFFFFFFFF);
-		sys_write32(val, dev_config->regs + SLV_PID_VALUE);
+		sys_write32(val, base + SLV_PID_VALUE);
 #else
 		return -ENOTSUP;
 #endif /* CONFIG_I3C_TARGET */
@@ -2512,13 +2525,18 @@ static int dw_i3c_pinctrl_enable(const struct device *dev, bool enable)
 
 static int dw_i3c_init(const struct device *dev)
 {
+	const mem_addr_t base = dw_i3c_get_base(dev);
 	const struct dw_i3c_config *config = dev->config;
 	struct dw_i3c_data *data = dev->data;
 	struct i3c_config_controller *ctrl_config = &data->common.ctrl_config;
+	mem_addr_t base;
 	int ret;
 	uint32_t hw_capabilities;
 	uint32_t queue_capability;
 	uint32_t device_ctrl_ext;
+
+	DEVICE_MMIO_NAMED_MAP(dev, reg_base, K_MEM_CACHE_NONE);
+	base = dw_i3c_get_base(dev);
 
 	if (!device_is_ready(config->clock)) {
 		return -ENODEV;
@@ -2545,21 +2563,21 @@ static int dw_i3c_init(const struct device *dev)
 	data->mode = i3c_bus_mode(&config->common.dev_list);
 #endif /* CONFIG_I3C_CONTROLLER */
 	/* reset all */
-	sys_write32(RESET_CTRL_ALL, config->regs + RESET_CTRL);
+	sys_write32(RESET_CTRL_ALL, base + RESET_CTRL);
 
 	/* get DAT, DCT pointer */
 	data->datstartaddr =
-		DEVICE_ADDR_TABLE_ADDR(sys_read32(config->regs + DEVICE_ADDR_TABLE_POINTER));
+		DEVICE_ADDR_TABLE_ADDR(sys_read32(base + DEVICE_ADDR_TABLE_POINTER));
 	data->dctstartaddr =
-		DEVICE_CHAR_TABLE_ADDR(sys_read32(config->regs + DEV_CHAR_TABLE_POINTER));
+		DEVICE_CHAR_TABLE_ADDR(sys_read32(base + DEV_CHAR_TABLE_POINTER));
 
 	/* get max devices based on table depth */
 	data->maxdevs =
-		DEVICE_ADDR_TABLE_DEPTH(sys_read32(config->regs + DEVICE_ADDR_TABLE_POINTER));
+		DEVICE_ADDR_TABLE_DEPTH(sys_read32(base + DEVICE_ADDR_TABLE_POINTER));
 	data->free_pos = GENMASK(data->maxdevs - 1, 0);
 
 	/* get fifo sizes */
-	queue_capability = sys_read32(config->regs + QUEUE_SIZE_CAPABILITY);
+	queue_capability = sys_read32(base + QUEUE_SIZE_CAPABILITY);
 	data->txfifodepth = QUEUE_SIZE_CAPABILITY_TX_BUF_DWORD_SIZE(queue_capability);
 	data->rxfifodepth = QUEUE_SIZE_CAPABILITY_RX_BUF_DWORD_SIZE(queue_capability);
 	data->cmdfifodepth = QUEUE_SIZE_CAPABILITY_CMD_BUF_DWORD_SIZE(queue_capability);
@@ -2568,7 +2586,7 @@ static int dw_i3c_init(const struct device *dev)
 
 	/* get HDR capabilities */
 	ctrl_config->supported_hdr = 0;
-	hw_capabilities = sys_read32(config->regs + HW_CAPABILITY);
+	hw_capabilities = sys_read32(base + HW_CAPABILITY);
 	if (hw_capabilities & HW_CAPABILITY_HDR_TS_EN) {
 		ctrl_config->supported_hdr |= I3C_MSG_HDR_TSP | I3C_MSG_HDR_TSL;
 	}
@@ -2577,7 +2595,7 @@ static int dw_i3c_init(const struct device *dev)
 	}
 
 	/* if the boot condition starts as a target, then it's a secondary controller */
-	device_ctrl_ext = sys_read32(config->regs + DEVICE_CTRL_EXTENDED);
+	device_ctrl_ext = sys_read32(base + DEVICE_CTRL_EXTENDED);
 	if (DEVICE_CTRL_EXTENDED_DEV_OPERATION_MODE(device_ctrl_ext) &
 	    DEVICE_CTRL_EXTENDED_DEV_OPERATION_MODE_SLAVE) {
 		ctrl_config->is_secondary = true;
@@ -2592,12 +2610,12 @@ static int dw_i3c_init(const struct device *dev)
 			(IS_ENABLED(CONFIG_I3C_CONTROLLER) && !ctrl_config->is_secondary));
 
 	/* disable ibi */
-	sys_write32(IBI_REQ_REJECT_ALL, config->regs + IBI_SIR_REQ_REJECT);
-	sys_write32(IBI_REQ_REJECT_ALL, config->regs + IBI_MR_REQ_REJECT);
+	sys_write32(IBI_REQ_REJECT_ALL, base + IBI_SIR_REQ_REJECT);
+	sys_write32(IBI_REQ_REJECT_ALL, base + IBI_MR_REQ_REJECT);
 
 	/* disable hot-join */
-	sys_write32(sys_read32(config->regs + DEVICE_CTRL) | (DEV_CTRL_HOT_JOIN_NACK),
-		    config->regs + DEVICE_CTRL);
+	sys_write32(sys_read32(base + DEVICE_CTRL) | (DEV_CTRL_HOT_JOIN_NACK),
+		    base + DEVICE_CTRL);
 #ifdef CONFIG_I3C_CONTROLLER
 	ret = i3c_addr_slots_init(dev);
 	if (ret != 0) {
@@ -2611,7 +2629,7 @@ static int dw_i3c_init(const struct device *dev)
 		}
 	}
 #endif /* CONFIG_I3C_CONTROLLER */
-	dw_i3c_enable_controller(config, true);
+	dw_i3c_enable_controller(dev, true);
 
 	ret = dw_i3c_init_scl_timing(dev, ctrl_config);
 	if (ret != 0) {
@@ -2630,9 +2648,9 @@ static int dw_i3c_init(const struct device *dev)
 		}
 		/* Bus Initialization Complete, allow HJ ACKs if not disabled */
 		if (!(config->common.flags & I3C_CONTROLLER_FLAG_DISABLE_HJ_AT_INIT)) {
-			sys_write32(sys_read32(config->regs + DEVICE_CTRL) &
+			sys_write32(sys_read32(base + DEVICE_CTRL) &
 				    ~(DEV_CTRL_HOT_JOIN_NACK),
-				    config->regs + DEVICE_CTRL);
+				    base + DEVICE_CTRL);
 		}
 	}
 #endif /* CONFIG_I3C_CONTROLLER */
@@ -2643,19 +2661,17 @@ static int dw_i3c_init(const struct device *dev)
 #if defined(CONFIG_PM_DEVICE)
 static int dw_i3c_pm_ctrl(const struct device *dev, enum pm_device_action action)
 {
-	const struct dw_i3c_config *config = dev->config;
-
 	LOG_DBG("PM action: %d", (int)action);
 
 	switch (action) {
 	case PM_DEVICE_ACTION_SUSPEND:
-		dw_i3c_enable_controller(config, false);
+		dw_i3c_enable_controller(dev, false);
 		dw_i3c_pinctrl_enable(dev, false);
 		break;
 
 	case PM_DEVICE_ACTION_RESUME:
 		dw_i3c_pinctrl_enable(dev, true);
-		dw_i3c_enable_controller(config, true);
+		dw_i3c_enable_controller(dev, true);
 		break;
 
 	default:
@@ -2742,7 +2758,7 @@ static DEVICE_API(i3c, dw_i3c_api) = {
 		.common.ctrl_config.scl_od_min.low_ns = DT_INST_PROP(n, od_tlow_min_ns),           \
 	};                                                                                         \
 	static const struct dw_i3c_config dw_i3c_cfg_##n = {                                       \
-		.regs = DT_INST_REG_ADDR(n),                                                       \
+		DEVICE_MMIO_NAMED_ROM_INIT(reg_base, DT_DRV_INST(n)),                              \
 		.clock = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)),                                    \
 		.clock_subsys = COND_CODE_1(DT_INST_PHA_HAS_CELL(n, clocks, clkid),                \
 				((clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid)),           \
