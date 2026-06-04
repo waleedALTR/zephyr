@@ -17,11 +17,15 @@
 #define ALTERA_AVALON_PIO_SET_BITS		0x10
 #define ALTERA_AVALON_PIO_CLEAR_BITS		0x14
 
+/* Required by DEVICE_MMIO_NAMED_* macros */
+#define DEV_CFG(_dev) ((const struct gpio_altera_config *)(_dev)->config)
+#define DEV_DATA(_dev) ((struct gpio_altera_data *)(_dev)->data)
+
 typedef void (*altera_cfg_func_t)(void);
 
 struct gpio_altera_config {
 	struct gpio_driver_config	common;
-	uintptr_t			reg_base;
+	DEVICE_MMIO_NAMED_ROM(mm_reg_base);
 	uint32_t			irq_num;
 	uint8_t				direction;
 	uint8_t				outset;
@@ -32,6 +36,7 @@ struct gpio_altera_config {
 struct gpio_altera_data {
 	/* gpio_driver_data needs to be first */
 	struct gpio_driver_data common;
+	DEVICE_MMIO_NAMED_RAM(mm_reg_base);
 	/* list of callbacks */
 	sys_slist_t cb;
 	struct k_spinlock lock;
@@ -41,7 +46,7 @@ static bool gpio_pin_direction(const struct device *dev, uint32_t pin_mask)
 {
 	const struct gpio_altera_config *cfg = dev->config;
 	const int direction = cfg->direction;
-	uintptr_t reg_base = cfg->reg_base;
+	mm_reg_t mm_reg_base = DEVICE_MMIO_NAMED_GET(dev, mm_reg_base);
 	uint32_t addr;
 	uint32_t pin_direction;
 
@@ -50,11 +55,11 @@ static bool gpio_pin_direction(const struct device *dev, uint32_t pin_mask)
 	}
 
 	/* Check if the direction is Bidirectional */
-	if (direction != 0) {
+	if (direction != 0 && direction != 3) {
 		return -EINVAL;
 	}
 
-	addr = reg_base + ALTERA_AVALON_PIO_DIRECTION_OFFSET;
+	addr = mm_reg_base + ALTERA_AVALON_PIO_DIRECTION_OFFSET;
 
 	pin_direction = sys_read32(addr);
 
@@ -72,7 +77,7 @@ static int gpio_altera_configure(const struct device *dev,
 	struct gpio_altera_data * const data = dev->data;
 	const int port_pin_mask = cfg->common.port_pin_mask;
 	const int direction = cfg->direction;
-	uintptr_t reg_base = cfg->reg_base;
+	mm_reg_t mm_reg_base = DEVICE_MMIO_NAMED_GET(dev, mm_reg_base);
 	k_spinlock_key_t key;
 	uint32_t addr;
 
@@ -82,17 +87,17 @@ static int gpio_altera_configure(const struct device *dev,
 	}
 
 	/* Check if the direction is Bidirectional */
-	if (direction != 0) {
+	if (direction != 0 && direction != 3) {
 		return -EINVAL;
 	}
 
-	addr = reg_base + ALTERA_AVALON_PIO_DIRECTION_OFFSET;
+	addr = mm_reg_base + ALTERA_AVALON_PIO_DIRECTION_OFFSET;
 
 	key = k_spin_lock(&data->lock);
 
-	if (flags == GPIO_INPUT) {
+	if (flags == GPIO_INPUT || flags == GPIO_OUTPUT_LOW || flags == GPIO_OUTPUT_INACTIVE) {
 		sys_clear_bits(addr, BIT(pin));
-	} else if (flags == GPIO_OUTPUT) {
+	} else if (flags == GPIO_OUTPUT || flags == GPIO_OUTPUT_HIGH || flags == GPIO_OUTPUT_ACTIVE) {
 		sys_set_bits(addr, BIT(pin));
 	} else {
 		return -EINVAL;
@@ -105,11 +110,10 @@ static int gpio_altera_configure(const struct device *dev,
 
 static int gpio_altera_port_get_raw(const struct device *dev, uint32_t *value)
 {
-	const struct gpio_altera_config *cfg = dev->config;
-	uintptr_t reg_base = cfg->reg_base;
+	mm_reg_t mm_reg_base = DEVICE_MMIO_NAMED_GET(dev, mm_reg_base);
 	uint32_t addr;
 
-	addr = reg_base + ALTERA_AVALON_PIO_DATA_OFFSET;
+	addr = mm_reg_base + ALTERA_AVALON_PIO_DATA_OFFSET;
 
 	if (value == NULL) {
 		return -EINVAL;
@@ -126,7 +130,7 @@ static int gpio_altera_port_set_bits_raw(const struct device *dev, gpio_port_pin
 	struct gpio_altera_data * const data = dev->data;
 	const uint8_t outset = cfg->outset;
 	const int port_pin_mask = cfg->common.port_pin_mask;
-	uintptr_t reg_base = cfg->reg_base;
+	mm_reg_t mm_reg_base = DEVICE_MMIO_NAMED_GET(dev, mm_reg_base);
 	uint32_t addr;
 	k_spinlock_key_t key;
 
@@ -141,10 +145,10 @@ static int gpio_altera_port_set_bits_raw(const struct device *dev, gpio_port_pin
 	key = k_spin_lock(&data->lock);
 
 	if (outset) {
-		addr = reg_base + ALTERA_AVALON_PIO_SET_BITS;
+		addr = mm_reg_base + ALTERA_AVALON_PIO_SET_BITS;
 		sys_write32(mask, addr);
 	} else {
-		addr = reg_base + ALTERA_AVALON_PIO_DATA_OFFSET;
+		addr = mm_reg_base + ALTERA_AVALON_PIO_DATA_OFFSET;
 		sys_set_bits(addr, mask);
 	}
 
@@ -159,7 +163,7 @@ static int gpio_altera_port_clear_bits_raw(const struct device *dev, gpio_port_p
 	struct gpio_altera_data * const data = dev->data;
 	const uint8_t outclear = cfg->outclear;
 	const int port_pin_mask = cfg->common.port_pin_mask;
-	uintptr_t reg_base = cfg->reg_base;
+	mm_reg_t mm_reg_base = DEVICE_MMIO_NAMED_GET(dev, mm_reg_base);
 	uint32_t addr;
 	k_spinlock_key_t key;
 
@@ -175,10 +179,10 @@ static int gpio_altera_port_clear_bits_raw(const struct device *dev, gpio_port_p
 	key = k_spin_lock(&data->lock);
 
 	if (outclear) {
-		addr = reg_base + ALTERA_AVALON_PIO_CLEAR_BITS;
+		addr = mm_reg_base + ALTERA_AVALON_PIO_CLEAR_BITS;
 		sys_write32(mask, addr);
 	} else {
-		addr = reg_base + ALTERA_AVALON_PIO_DATA_OFFSET;
+		addr = mm_reg_base + ALTERA_AVALON_PIO_DATA_OFFSET;
 		sys_clear_bits(addr, mask);
 	}
 
@@ -187,9 +191,23 @@ static int gpio_altera_port_clear_bits_raw(const struct device *dev, gpio_port_p
 	return 0;
 }
 
+static int gpio_altera_port_toggle_bits(const struct device *dev, gpio_port_pins_t mask)
+{
+	uint32_t val = 0;
+	gpio_altera_port_get_raw(dev, &val);
+	if((val & mask)) {
+		gpio_altera_port_clear_bits_raw(dev, mask);
+	} else {
+		gpio_altera_port_set_bits_raw(dev, mask);
+	}
+        return 0;
+}
+
 static int gpio_init(const struct device *dev)
 {
 	const struct gpio_altera_config *cfg = dev->config;
+
+	DEVICE_MMIO_NAMED_MAP(dev, mm_reg_base, K_MEM_CACHE_NONE);
 
 	/* Configure GPIO device */
 	cfg->cfg_func();
@@ -206,7 +224,7 @@ static int gpio_altera_pin_interrupt_configure(const struct device *dev,
 
 	const struct gpio_altera_config *cfg = dev->config;
 	struct gpio_altera_data * const data = dev->data;
-	uintptr_t reg_base = cfg->reg_base;
+	mm_reg_t mm_reg_base = DEVICE_MMIO_NAMED_GET(dev, mm_reg_base);
 	const int port_pin_mask = cfg->common.port_pin_mask;
 	uint32_t addr;
 	k_spinlock_key_t key;
@@ -220,7 +238,7 @@ static int gpio_altera_pin_interrupt_configure(const struct device *dev,
 		return -EINVAL;
 	}
 
-	addr = reg_base + ALTERA_AVALON_PIO_IRQ_OFFSET;
+	addr = mm_reg_base + ALTERA_AVALON_PIO_IRQ_OFFSET;
 
 	key = k_spin_lock(&data->lock);
 
@@ -257,14 +275,13 @@ static int gpio_altera_manage_callback(const struct device *dev,
 
 static void gpio_altera_irq_handler(const struct device *dev)
 {
-	const struct gpio_altera_config *cfg = dev->config;
-	struct gpio_altera_data *data = dev->data;
-	uintptr_t reg_base = cfg->reg_base;
+	struct gpio_altera_data * const data = dev->data;
+	mm_reg_t mm_reg_base = DEVICE_MMIO_NAMED_GET(dev, mm_reg_base);
 	uint32_t port_value;
 	uint32_t addr;
 	k_spinlock_key_t key;
 
-	addr = reg_base + ALTERA_AVALON_PIO_IRQ_OFFSET;
+	addr = mm_reg_base + ALTERA_AVALON_PIO_IRQ_OFFSET;
 
 	key = k_spin_lock(&data->lock);
 
@@ -284,7 +301,7 @@ static DEVICE_API(gpio, gpio_altera_driver_api) = {
 	.port_set_masked_raw	 = NULL,
 	.port_set_bits_raw	 = gpio_altera_port_set_bits_raw,
 	.port_clear_bits_raw	 = gpio_altera_port_clear_bits_raw,
-	.port_toggle_bits	 = NULL,
+	.port_toggle_bits	 = gpio_altera_port_toggle_bits,
 	.pin_interrupt_configure = gpio_altera_pin_interrupt_configure,
 	.manage_callback	 = gpio_altera_manage_callback
 };
@@ -300,10 +317,10 @@ static DEVICE_API(gpio, gpio_altera_driver_api) = {
 	static struct gpio_altera_data gpio_altera_data_##n;		\
 	static struct gpio_altera_config gpio_config_##n = {		\
 		.common		= {					\
-		.port_pin_mask	=					\
+			.port_pin_mask	=				\
 				  GPIO_PORT_PIN_MASK_FROM_DT_INST(n),	\
 		},						        \
-		.reg_base	= DT_INST_REG_ADDR(n),			\
+		DEVICE_MMIO_NAMED_ROM_INIT(mm_reg_base, DT_DRV_INST(n)),\
 		.direction	= DT_INST_ENUM_IDX(n, direction),	\
 		.irq_num	= COND_CODE_1(DT_INST_IRQ_HAS_IDX(n, 0), (DT_INST_IRQN(n)), (0)),\
 		.cfg_func	= gpio_altera_cfg_func_##n,		\

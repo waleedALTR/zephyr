@@ -376,16 +376,23 @@ int32_t do_bridge_reset_plat(uint32_t enable, uint32_t mask)
 		return -EIO;
 	}
 
+	printk("is_fpga_config_not_ready ret=%d\n", ret);
+
 	/* Bridge reset */
 	ret = socfpga_bridges_reset(enable, mask);
 	if (ret) {
 		LOG_ERR("Bridge reset failed");
 	}
 
+	printk("socfpga_bridges_reset ret=%d\n", ret);
+
 	/* Ignoring the return value to return bridge reset status */
 	if (svc_client_close()) {
 		LOG_ERR("Unregistering & Closing failed");
 	}
+	
+	printk("do_bridge_reset_plat ret=%d\n", ret);
+
 	return ret;
 }
 

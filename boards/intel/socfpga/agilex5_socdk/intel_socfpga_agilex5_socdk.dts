@@ -30,6 +30,11 @@
 		led0: led0 {
 			gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
 		};
+		
+		pio_led0: pio_led0 {
+			gpios = <&fpga_pio_led0 0 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Fabric PIO LED 0";
+		};
 	};
 };
 

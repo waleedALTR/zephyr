@@ -127,6 +127,15 @@
 		compatible = "altr,socfpga-agilex-bridge";
 	};
 
+        fpga_pio_led0: pio_led0@20010080 {
+            compatible = "altr,pio-1.0";
+            reg = <0x20010080 0x20>;
+            direction = "output";
+            gpio-controller;
+            #gpio-cells = <2>;
+	    status = "disabled";
+        };
+
 	gpio0: gpio@10c03200 {
 		compatible = "snps,designware-gpio";
 		reg = <0x10c03200 0x100>;

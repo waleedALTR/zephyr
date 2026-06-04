@@ -906,7 +906,7 @@ static int sip_svc_subsys_init(void)
 		ctrl->tid = k_thread_create(
 			&ctrl->thread, ctrl->stack, CONFIG_ARM_SIP_SVC_SUBSYS_THREAD_STACK_SIZE,
 			sip_svc_thread, ctrl, NULL, NULL, CONFIG_ARM_SIP_SVC_SUBSYS_THREAD_PRIORITY,
-			K_ESSENTIAL, K_NO_WAIT);
+			0, K_NO_WAIT);
 		k_thread_name_set(ctrl->tid, "sip_svc");
 		k_sem_init(&ctrl->thread_sem, 0, 1);
 
