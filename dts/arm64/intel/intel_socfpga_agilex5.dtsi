@@ -361,6 +361,7 @@
 	clock: clock@10d10000 {
 		compatible = "intel,agilex5-clock";
 		reg = <0x10d10000 0x1000>;
+		sysmgr = <&sysmgr>;
 		#clock-cells = <1>;
 	};
 
