@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2023 Intel Corporation
+ * Copyright (C) 2026 Intel Corporation
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -7,10 +7,6 @@
  * dts nodes required by this application for this
  * board.
  */
-
-&fpga_pio_led0 {
-	status = "okay";
-};
 
 &sip_smc {
         status = "okay";

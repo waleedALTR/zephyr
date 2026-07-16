@@ -95,3 +95,14 @@ Tips:
 - If the LED is built in to your board hardware, the alias should be defined in
   your :ref:`BOARD.dts file <devicetree-in-out-files>`. Otherwise, you can
   define one in a :ref:`devicetree overlay <set-devicetree-overlays>`.
+
+Testing with FPGA PIO LED
+=========================
+
+Build the sample with the FPGA PIO LED overlay to validate the
+``gpio_altera_pio`` driver:
+
+.. code-block:: console
+
+   west build -b intel_socfpga_agilex5_socdk samples/basic/blinky -- \
+     -DDTC_OVERLAY_FILE=$ZEPHYR_BASE/samples/basic/blinky/boards/intel_socfpga_agilex5_socdk_fpga.overlay

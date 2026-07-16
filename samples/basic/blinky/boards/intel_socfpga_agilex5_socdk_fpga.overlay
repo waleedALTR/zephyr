@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2026, Intel Corporation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * This overlay remaps the default 'led0' alias to the FPGA PIO LED,
+ * allowing the generic blinky sample to exercise the gpio_altera_pio
+ * driver without modifying the application or the board's default
+ * devicetree.
+ */
+
+&fpga_pio_led0 {
+	status = "okay";
+};
+
+/ {
+    aliases {
+        led0 = &pio_led0;
+    };
+};
