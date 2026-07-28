@@ -9,5 +9,5 @@ config NUM_IRQS
 	default 274
 
 config KERNEL_VM_SIZE
-	default 0x400000
+	default 0x800000
 endif
