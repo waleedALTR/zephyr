@@ -1,0 +1,20 @@
+/*
+ * Copyright (c) 2026 Intel Corporation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+	aliases {
+		led0 = &pio_led0;
+		sw0 = &button0;
+	};
+};
+
+&fpga_pio_button0 {
+	status = "okay";
+};
+
+&fpga_pio_led0 {
+	status = "okay";
+};

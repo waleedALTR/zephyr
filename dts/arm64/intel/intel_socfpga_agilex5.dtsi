@@ -134,6 +134,30 @@
 		compatible = "altr,socfpga-agilex-bridge";
 	};
 
+	fpga_pio_led0: pio_led0@20010080 {
+		compatible = "altr,pio-1.0";
+		reg = <0x20010080 0x20>;
+		direction = "output";
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
+	fpga_pio_button0: pio_button@20010060 {
+		compatible = "altr,pio-1.0";
+		reg = <0x20010060 0x20>;
+		direction = "input";
+		interrupt-parent = <&gic>;
+		/*
+		 * fpga2hps_interrupt_irq0[0]: TRM irqS=17, GIC INTID=49.
+		 * Zephyr GIC_SPI uses irqS (SPI index).
+		 */
+		interrupts = <GIC_SPI 17 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "disabled";
+	};
+
 	gpio0: gpio@10c03200 {
 		compatible = "snps,designware-gpio";
 		reg = <0x10c03200 0x100>;
