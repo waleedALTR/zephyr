@@ -8,6 +8,9 @@
 # Compiler Options
 CONFIG_FORTIFY_SOURCE_RUN_TIME=y
 
+# Kernel Option
+CONFIG_KERNEL_DIRECT_MAP=n
+
 # Arm Features
 CONFIG_ARM_ARCH_TIMER=y
 CONFIG_CACHE_MANAGEMENT=y
@@ -38,3 +41,6 @@ CONFIG_PM_CPU_OPS_PSCI=y
 # Enable SMP support
 CONFIG_SMP=y
 CONFIG_MP_MAX_NUM_CPUS=4
+
+# Increase translation tables to support QSPI
+CONFIG_MAX_XLAT_TABLES=16

@@ -8,6 +8,21 @@
  * board.
  */
 
+&qspi {
+	status = "okay";
+};
+
+&sdmmc {
+	status = "okay";
+
+	mmc {
+		/*SD Disk Access */
+		compatible = "zephyr,sdmmc-disk";
+		disk-name = "SD";
+		status = "okay";
+	};
+};
+
 &timer0 {
 	status = "okay";
 };
@@ -46,25 +61,45 @@
 };
 
 &i3c0 {
-	status = "okay";
+	status = "disabled";
 
 	lps22hh0: lps22hh@FB1122330001 {
 		compatible = "st,lps22hh";
 		reg = <0x00 0xFB11 0x22330001>;
 		odr = <1>;
-		status = "okay";
+		status = "disabled";
 	};
 
 	lps22hh1: lps22hh@FB1122330002 {
 		compatible = "st,lps22hh";
 		reg = <0x00 0xFB11 0x22330002>;
 		odr = <1>;
-		status = "okay";
+		status = "disabled";
 	};
 
 	lps22hh2: lps22hh@500000000000000050 { /* i2c device */
 		compatible = "st,lps22hh";
 		reg = <0x50 0x0 0x50>;
-		status = "okay";
+		status = "disabled";
 	};
+};
+
+&i2c0 {
+	status = "okay";
+};
+
+&i2c1 {
+	status = "okay";
+};
+
+&i2c2 {
+	status = "okay";
+};
+
+&i2c3 {
+	status = "okay";
+};
+
+&i2c4 {
+	status = "okay";
 };
