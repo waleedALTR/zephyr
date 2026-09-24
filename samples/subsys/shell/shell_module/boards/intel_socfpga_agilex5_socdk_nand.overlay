@@ -1,0 +1,54 @@
+/*
+ * Copyright (C) 2026 Altera Corporation
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "intel_socfpga_agilex5_socdk.overlay"
+
+&sdmmc {
+	status = "disabled";
+};
+
+&qspi {
+	status = "disabled";
+};
+
+&xgmac2 {
+	status = "disabled";
+};
+
+&mdio2 {
+	status = "disabled";
+};
+
+&xgmac0 {
+	status = "okay";
+};
+
+&mdio0 {
+	status = "okay";
+};
+
+&nand {
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+};
+
+&i2c1 {
+	status = "okay";
+};
+
+&i2c2 {
+	status = "okay";
+};
+
+&i2c3 {
+	status = "okay";
+};
+
+&i2c4 {
+	status = "okay";
+};
