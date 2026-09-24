@@ -13,7 +13,7 @@
 
 #define NAND_INT_SEM_TAKE(param_ptr)						\
 		COND_CODE_1(IS_ENABLED(CONFIG_CDNS_NAND_INTERRUPT_SUPPORT),     \
-		(k_sem_take(&(param_ptr->interrupt_sem_t), K_FOREVER)), ())
+		(k_sem_take(&(param_ptr->interrupt_sem_t), K_SECONDS(10))), ())
 
 #define CNF_GET_INIT_COMP(x)				(FIELD_GET(BIT(9), x))
 #define CNF_GET_INIT_FAIL(x)				(FIELD_GET(BIT(10), x))
@@ -103,6 +103,8 @@
 
 /* Interrupt register field offsets */
 #define INTERRUPT_STATUS_REG				(0x0114)
+#define THREAD_INTERRUPT_ERROR				(0x0128)
+#define THREAD_INTERRUPT_ERROR_ENABLE			(0x0130)
 #define THREAD_INTERRUPT_STATUS				(0x0138)
 
 /* Mini controller DLL PHY controller register field offsets */
@@ -119,6 +121,9 @@
 #define CNF_MINICTRL_TOGGLE_TIMINGS1			(0x1018)
 #define CNF_MINICTRL_ASYNC_TOGGLE_TIMINGS		(0x101C)
 #define CNF_MINICTRL_SYNC_TIMINGS			(0x1020)
+#define CNF_MINICTRL_TIMINGS0				(0x1024)
+#define CNF_MINICTRL_TIMINGS1				(0x1028)
+#define CNF_MINICTRL_TIMINGS2				(0x102C)
 #define CNF_MINICTRL_DLL_PHY_CTRL			(0x1034)
 
 #define CNF_MINICTRL(_base, _reg)			(_base + (CNF_MINICTRL_##_reg))
@@ -138,6 +143,7 @@
 /* Interrupt status register. */
 #define INTR_STATUS					(0x0110)
 #define GINTR_ENABLE					(31)
+#define CMD_ETE_INTR_ENABLE				(17)
 #define INTERRUPT_DISABLE				(0)
 #define INTERRUPT_ENABLE				(1)
 
@@ -245,7 +251,7 @@
 #define PHY_TSEL_REG_SDR				(0x00000000)
 #define PHY_DQ_TIMING_REG_SDR				(0x00000002)
 #define PHY_DQS_TIMING_REG_SDR				(0x00100004)
-#define PHY_GATE_LPBK_CTRL_REG_SDR			(0x00D80000)
+#define PHY_GATE_LPBK_CTRL_REG_SDR			(0x00380000)
 #define PHY_DLL_MASTER_CTRL_REG_SDR			(0x00800000)
 #define PHY_DLL_SLAVE_CTRL_REG_SDR			(0x00000000)
 

@@ -213,6 +213,19 @@ static int cmd_copy(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static void shell_hexdump_data(const struct shell *sh, unsigned int addr,
+			const uint8_t *data, size_t len)
+{
+	int off, ln;
+
+	for (off = 0; off < len; off += ln) {
+		ln = MIN(len - off, SHELL_HEXDUMP_BYTES_IN_LINE);
+		shell_hexdump_line(sh, addr, data, ln);
+		addr += ln;
+		data += ln;
+	}
+}
+
 static int cmd_read(const struct shell *sh, size_t argc, char *argv[])
 {
 	const struct device *flash_dev;
@@ -234,15 +247,19 @@ static int cmd_read(const struct shell *sh, size_t argc, char *argv[])
 	}
 
 	for (upto = 0; upto < cnt; upto += todo) {
-		uint8_t data[SHELL_HEXDUMP_BYTES_IN_LINE];
+		uint8_t *data = test_arr;
+		int size = sizeof(test_arr);
 
-		todo = MIN(cnt - upto, SHELL_HEXDUMP_BYTES_IN_LINE);
+		todo = MIN(cnt - upto, size);
 		ret = flash_read(flash_dev, addr, data, todo);
 		if (ret != 0) {
 			shell_error(sh, "Read ERROR!");
 			return -EIO;
 		}
-		shell_hexdump_line(sh, addr, data, todo);
+		shell_print(sh, "Read %d bytes", todo);
+		if (todo <= 8192) {
+			shell_hexdump_data(sh, addr, data, todo);
+		}
 		addr += todo;
 	}
 
@@ -440,8 +457,10 @@ static int cmd_write_test(const struct shell *sh, size_t argc, char *argv[])
 		return result;
 	}
 
+	uint8_t *va;
+        device_map((mm_reg_t *)&va, 0x80700000, size, K_MEM_CACHE_NONE);
 	for (uint32_t i = 0; i < size; i++) {
-		test_arr[i] = (uint8_t)i;
+		test_arr[i] = va[i];
 	}
 
 	while (repeat--) {
@@ -708,6 +727,139 @@ static int cmd_load(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static bool flash_shell_src_in_region(uintptr_t addr, size_t len,
+				      uintptr_t base, size_t region_len)
+{
+	if (len == 0U || region_len == 0U) {
+		return false;
+	}
+	if (addr < base) {
+		return false;
+	}
+	return (addr - base) <= (region_len - len);
+}
+
+static int flash_shell_check_ddr_src(const struct shell *sh, uintptr_t addr, size_t len)
+{
+#if DT_NODE_EXISTS(DT_NODELABEL(fpga_config)) || DT_NODE_EXISTS(DT_NODELABEL(low_ddr))
+	bool ok = false;
+
+#if DT_NODE_EXISTS(DT_NODELABEL(fpga_config))
+	if (flash_shell_src_in_region(addr, len,
+				      (uintptr_t)DT_REG_ADDR(DT_NODELABEL(fpga_config)),
+				      (size_t)DT_REG_SIZE(DT_NODELABEL(fpga_config)))) {
+		ok = true;
+	}
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(low_ddr))
+	if (flash_shell_src_in_region(addr, len,
+				      (uintptr_t)DT_REG_ADDR(DT_NODELABEL(low_ddr)),
+				      (size_t)DT_REG_SIZE(DT_NODELABEL(low_ddr)))) {
+		ok = true;
+	}
+#endif
+	if (!ok) {
+		shell_error(sh,
+			    "DDR source [0x%lx + %zu) is outside mapped load regions",
+			    (unsigned long)addr, len);
+#if DT_NODE_EXISTS(DT_NODELABEL(fpga_config))
+		shell_error(sh, "  fpga_config [0x%lx .. 0x%lx)",
+			    (unsigned long)DT_REG_ADDR(DT_NODELABEL(fpga_config)),
+			    (unsigned long)(DT_REG_ADDR(DT_NODELABEL(fpga_config)) +
+					    DT_REG_SIZE(DT_NODELABEL(fpga_config))));
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(low_ddr))
+		shell_error(sh, "  low_ddr [0x%lx .. 0x%lx)",
+			    (unsigned long)DT_REG_ADDR(DT_NODELABEL(low_ddr)),
+			    (unsigned long)(DT_REG_ADDR(DT_NODELABEL(low_ddr)) +
+					    DT_REG_SIZE(DT_NODELABEL(low_ddr))));
+#endif
+		return -EINVAL;
+	}
+	return 0;
+#else
+	if (addr == 0U || len == 0U) {
+		shell_error(sh, "Invalid DDR source 0x%lx len %zu",
+			    (unsigned long)addr, len);
+		return -EINVAL;
+	}
+	shell_warn(sh, "DDR source 0x%lx is not DT-checked (no fpga_config/low_ddr)",
+		   (unsigned long)addr);
+	return 0;
+#endif
+}
+
+static int cmd_mem_write(const struct shell *sh, size_t argc, char *argv[])
+{
+	const struct device *flash_dev;
+	struct flash_pages_info info;
+	uint32_t flash_off;
+	unsigned long long ddr_addr;
+	unsigned long size;
+	size_t write_len;
+	uint8_t *src;
+	int ret;
+	int err = 0;
+
+	ret = parse_helper(sh, &argc, &argv, &flash_dev, &flash_off);
+	if (ret) {
+		return ret;
+	}
+	if (argc < 4) {
+		shell_error(sh,
+			    "Usage: flash mem_write [<device>] <flash_offset> <ddr_addr> <size>");
+		return -EINVAL;
+	}
+
+	ddr_addr = shell_strtoull(argv[2], 0, &err);
+	if (err != 0) {
+		shell_error(sh, "Invalid DDR address: %s", argv[2]);
+		return -EINVAL;
+	}
+	err = 0;
+	size = shell_strtoul(argv[3], 0, &err);
+	if (err != 0 || size == 0U) {
+		shell_error(sh, "Invalid size: %s", argv[3]);
+		return -EINVAL;
+	}
+
+	ret = flash_get_page_info_by_offs(flash_dev, flash_off, &info);
+	if (ret != 0) {
+		shell_error(sh, "Could not get page info, code %d", ret);
+		return ret;
+	}
+
+	if ((flash_off % info.size) != 0U) {
+		shell_error(sh, "Flash offset 0x%x is not aligned to page size %zu",
+			    flash_off, info.size);
+		return -EINVAL;
+	}
+
+	write_len = ROUND_UP(size, info.size);
+	src = (uint8_t *)(uintptr_t)ddr_addr;
+
+	ret = flash_shell_check_ddr_src(sh, (uintptr_t)src, write_len);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (write_len > size) {
+		memset(src + size, 0xff, write_len - size);
+	}
+
+	shell_print(sh, "Writing %zu bytes from DDR 0x%lx to flash 0x%x",
+		    write_len, (unsigned long)(uintptr_t)src, flash_off);
+	ret = flash_write(flash_dev, flash_off, src, write_len);
+	if (ret != 0) {
+		shell_error(sh, "Write failed, code %d", ret);
+		return ret;
+	}
+
+	shell_print(sh, "Wrote %zu bytes (file %lu, page %zu)",
+		    write_len, size, info.size);
+	return 0;
+}
+
 static int cmd_page_info(const struct shell *sh, size_t argc, char *argv[])
 {
 	const struct device *flash_dev;
@@ -783,6 +935,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(flash_cmds,
 	SHELL_CMD_ARG(load, &dsub_device_name,
 		"[<device>] <address> <size>",
 		cmd_load, 3, 1),
+	SHELL_CMD_ARG(mem_write, &dsub_device_name,
+		"[<device>] <flash_offset> <ddr_addr> <size>",
+		cmd_mem_write, 4, 1),
 	SHELL_CMD_ARG(page_info, &dsub_device_name,
 		"[<device>] <address>",
 		cmd_page_info, 2, 1),

@@ -236,6 +236,18 @@ static int flash_cdns_nand_init(const struct device *nand_dev)
 		LOG_ERR("NAND initialization Failed");
 		return ret;
 	}
+	nand_param->page_count =
+		(nand_param->npages_per_block * nand_param->nblocks_per_lun * nand_param->nluns);
+
+	LOG_INF("page_size %u spare_size %u page_count %lu"
+			" npages_per_block %u nblocks_per_lun %u nluns %u\n",
+			nand_param->page_size,
+			nand_param->spare_size,
+			nand_param->page_count,
+			nand_param->npages_per_block,
+			nand_param->nblocks_per_lun,
+			nand_param->nluns);
+
 	return 0;
 }
 
