@@ -51,4 +51,11 @@ config FLASH_CDNS_CDMA_BLOCK_COUNT
 	help
 	  Configure the block count for a single transfer in the CDMA Mode
 
+config FLASH_CDNS_NAND_PAGE_BUF_SIZE
+	int "Static DMA page buffer size (page + spare)"
+	default 18432
+	help
+	  Size of the cache-aligned static buffer used for page read/write DMA.
+	  Must be at least (NAND page size + spare size). Default is 16KiB + 2KiB.
+
 endif # FLASH_CDNS_NAND

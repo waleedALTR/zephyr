@@ -4,22 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <string.h>
 #include <zephyr/cache.h>
+#include <zephyr/kernel/mm.h>
+#include <zephyr/sys/util.h>
 #include "flash_cadence_nand_ll.h"
 
 LOG_MODULE_REGISTER(flash_cdns_nand_ll, CONFIG_FLASH_LOG_LEVEL);
-
-/* DMA buffers must own whole cache lines. Cache maintenance is line
- * granular, so a buffer starting mid-line makes sys_cache_data_invd_range()
- * clean-and-invalidate the partial first line, writing the stale 0xff from
- * memset() back over the data the controller just DMA'd into DRAM.
- */
-#define NAND_DMA_ALIGN					64U
-
-static void *nand_dma_alloc(size_t size)
-{
-	return k_aligned_alloc(NAND_DMA_ALIGN, ROUND_UP(size, NAND_DMA_ALIGN));
-}
 
 static inline void cdns_nand_dump_regs(mem_addr_t base_address)
 {
@@ -353,40 +344,76 @@ static int cdns_nand_set_opr_mode(uintptr_t base_address, uint8_t opr_mode)
 /**
  * Configure the transfer settings of the Cadence NAND controller.
  *
- * @param base_address The base address of the Cadence NAND controller.
+ * Packs TRANS_CFG0/1 like ATF (cdns_nand.h). Sector count / last-sector size
+ * are derived from discovered page/spare when they match ATF’s sector size
+ * (0x800), so the programmed value stays compatible with ATF.
+ *
+ * @param params The Cadence NAND parameters structure.
  * @retval  0 on success or -ETIMEDOUT error value on failure.
  */
-static int cdns_nand_transfer_config(uintptr_t base_address)
+static int cdns_nand_transfer_config(struct cadence_nand_params *params)
 {
-	int ret = 0;
-	/* Wait for controller to be in idle state */
-	ret = cdns_nand_wait_idle(base_address);
+	uintptr_t base_address = params->nand_base;
+	uint32_t sector_cnt = CNF_SECTOR_CNT;
+	uint32_t sector_size = CNF_SECTOR_SIZE;
+	uint32_t last_sector_size = CNF_LAST_SECTOR_SIZE;
+	uint32_t skip_offset = CNF_SKIP_BYTES_OFFSET_VAL;
+	uint32_t trans_cfg0;
+	uint32_t trans_cfg1;
+	uint32_t oob_per_sector;
+	int ret;
 
+	ret = cdns_nand_wait_idle(base_address);
 	if (ret != 0) {
 		LOG_ERR("Wait for controller to be in idle state Failed");
 		return ret;
 	}
 
-	/* Configure data transfer parameters */
-	sys_write32(4, CNF_CTRLCFG(base_address, TRANS_CFG0));
-	sys_write32(0x08280800, CNF_CTRLCFG(base_address, TRANS_CFG1));
+	/*
+	 * ATF uses fixed CNF_SECTOR_SIZE (0x800) and CNF_LAST_SECTOR_SIZE
+	 * (0x828). Derive the same fields from NAND geometry when possible:
+	 *   sector_cnt       = page_size / sector_size
+	 *   last_sector_size = sector_size + (spare_size / sector_cnt)
+	 * For page=8192, spare=160 → cnt=4, last=2048+40=0x828 (= ATF).
+	 */
+	if ((params->page_size != 0U) &&
+	    ((params->page_size % CNF_SECTOR_SIZE) == 0U)) {
+		sector_size = CNF_SECTOR_SIZE;
+		sector_cnt = params->page_size / sector_size;
+		if ((sector_cnt != 0U) && (params->spare_size != 0U) &&
+		    ((params->spare_size % sector_cnt) == 0U)) {
+			oob_per_sector = params->spare_size / sector_cnt;
+			last_sector_size = sector_size + oob_per_sector;
+		}
+		skip_offset = params->page_size;
+	}
+
+	trans_cfg0 = sector_cnt |
+		     FIELD_PREP(CNF_SECTOR_OFFSET_MASK, CNF_SECTOR_OFFSET);
+	trans_cfg1 = sector_size |
+		     FIELD_PREP(CNF_LAST_SECTOR_MASK, last_sector_size);
+
+	sys_write32(trans_cfg0, CNF_CTRLCFG(base_address, TRANS_CFG0));
+	sys_write32(trans_cfg1, CNF_CTRLCFG(base_address, TRANS_CFG1));
 
 	/* Disable cache and multiplane. */
 	sys_write32(DISABLE, CNF_CTRLCFG(base_address, MULTIPLANE_CFG));
 	sys_write32(DISABLE, CNF_CTRLCFG(base_address, CACHE_CFG));
 
+	/* ECC / skip — same packing as ATF CNF_ECC_CFG0_VAL / SKIP_BYTES_* */
+	sys_write32(CNF_ECC_CFG0_VAL, CNF_CTRLCFG(base_address, ECC_CFG0));
+	sys_write32(CNF_ECC_CFG1_VAL, CNF_CTRLCFG(base_address, ECC_CFG1));
+	sys_write32(CNF_SKIP_BYTES_CFG_VAL, CNF_MINICTRL(base_address, SKIP_BYTES_CFG));
+	sys_write32(skip_offset, CNF_MINICTRL(base_address, SKIP_BYTES_OFFSET));
 
-	sys_write32(0x203, CNF_CTRLCFG(base_address, ECC_CFG0));
-	sys_write32(0x20, CNF_CTRLCFG(base_address, ECC_CFG1));
-	sys_write32(0xffff0002, CNF_MINICTRL(base_address, SKIP_BYTES_CFG));
-	sys_write32(0x2000, CNF_MINICTRL(base_address, SKIP_BYTES_OFFSET));
 	sys_write32(0x04040404, CNF_MINICTRL(base_address, ASYNC_TOGGLE_TIMINGS));
-
 	sys_write32(0x27310b13, CNF_MINICTRL(base_address, TIMINGS0));
 	sys_write32(0x141c0031, CNF_MINICTRL(base_address, TIMINGS1));
 	sys_write32(0x00630106, CNF_MINICTRL(base_address, TIMINGS2));
-	
-	/* Clear all interrupts. */
+
+	LOG_INF("TRANS_CFG0=0x%x TRANS_CFG1=0x%x (sec=%u cnt=%u last=%u)",
+		trans_cfg0, trans_cfg1, sector_size, sector_cnt, last_sector_size);
+
 	sys_write32(CLEAR_ALL_INTERRUPT, (base_address + INTR_STATUS));
 	return 0;
 }
@@ -399,7 +426,6 @@ static int cdns_nand_transfer_config(uintptr_t base_address)
  */
 int cdns_nand_init(struct cadence_nand_params *params)
 {
-	//uint32_t reg_value_read = 0;
 	uintptr_t base_address = params->nand_base;
 	uint8_t datarate_mode = params->datarate_mode;
 	int ret;
@@ -451,7 +477,7 @@ int cdns_nand_init(struct cadence_nand_params *params)
 	}
 
 	/* Set data transfer configuration parameters */
-	ret = cdns_nand_transfer_config(base_address);
+	ret = cdns_nand_transfer_config(params);
 	if (ret != 0) {
 		return ret;
 	}
@@ -462,7 +488,6 @@ int cdns_nand_init(struct cadence_nand_params *params)
 		LOG_ERR("Wait for controller to be in idle state Failed");
 		return ret;
 	}
-#if 0
 	/* DMA Setting */
 	sys_write32((F_BURST_SEL_SET(NF_TDEF_BURST_SEL)) | (BIT(F_OTE)),
 		    (base_address + NF_DMA_SETTING));
@@ -471,7 +496,7 @@ int cdns_nand_init(struct cadence_nand_params *params)
 	sys_write32(((NF_FIFO_TRIGG_LVL_SET(PRE_FETCH_VALUE)) |
 		     (NF_DMA_PACKAGE_SIZE_SET(PRE_FETCH_VALUE))),
 		    (base_address + NF_PRE_FETCH));
-#endif
+
 	/* Total bits in row addressing*/
 	params->total_bit_row = find_msb_set(((params->npages_per_block) - 1)) +
 				find_msb_set((params->nblocks_per_lun) - 1);
@@ -513,19 +538,19 @@ void cdns_nand_cdma_prepare(char nf_mem, uint32_t flash_ptr, char *mem_ptr, uint
 	struct cdns_cdma_command_descriptor *cdma_desc;
 
 	cdma_desc = desc;
+	memset(cdma_desc, 0, sizeof(*cdma_desc));
 	/* set fields for one descriptor */
 	cdma_desc->flash_pointer = flash_ptr;
 	cdma_desc->bank_number = nf_mem;
-	cdma_desc->command_flags |= CDMA_CF_DMA_MASTER_SET(dma_sel) | F_CFLAGS_VOL_ID_SET(vol_id);
-	cdma_desc->memory_pointer = k_mem_phys_addr(mem_ptr);
+	cdma_desc->command_flags = CDMA_CF_DMA_MASTER_SET(dma_sel) | F_CFLAGS_VOL_ID_SET(vol_id);
+	cdma_desc->memory_pointer = (mem_ptr != NULL) ? k_mem_phys_addr(mem_ptr) : 0;
 	cdma_desc->status = 0;
 	cdma_desc->sync_flag_pointer = 0;
 	cdma_desc->sync_arguments = 0;
 	cdma_desc->ctrl_data_ptr = 0;
 	cdma_desc->command_type = ctype;
 	if (cmd_cnt > 1) {
-		cdma_desc->next_pointer = (uintptr_t)(desc + 1);
-		cdma_desc->command_flags |= CFLAGS_MPTRPC_SET;
+		cdma_desc->next_pointer = k_mem_phys_addr(desc + 1);
 		cdma_desc->command_flags |= CFLAGS_CONT_SET;
 	} else {
 		cdma_desc->next_pointer = 0;
@@ -533,7 +558,7 @@ void cdns_nand_cdma_prepare(char nf_mem, uint32_t flash_ptr, char *mem_ptr, uint
 		cdma_desc->command_flags |= CDMA_CF_INT_SET;
 #endif
 	}
-	sys_cache_data_flush_range(cdma_desc, sizeof(*cdma_desc));
+	sys_cache_data_flush_and_invd_range(cdma_desc, sizeof(*cdma_desc));
 }
 
 /**
@@ -564,13 +589,16 @@ static int cdns_transfer_complete(struct cdns_cdma_command_descriptor *desc_ptr,
 #else
 	ARG_UNUSED(params);
 
-	if (!WAIT_FOR(((desc_ptr->status & (BIT(F_CSTAT_COMP))) != 0), IDLE_TIME_OUT,
-		      k_msleep(1))) {
+	sys_cache_data_invd_range(desc_ptr, sizeof(*desc_ptr));
+	if (!WAIT_FOR(((desc_ptr->status & (BIT(F_CSTAT_COMP))) != 0), IDLE_TIME_OUT, ({
+			      k_msleep(1);
+			      sys_cache_data_invd_range(desc_ptr, sizeof(*desc_ptr));
+		      }))) {
 		LOG_ERR("Timed out waiting for thread status response");
 		return -ETIMEDOUT;
 	}
 	if ((desc_ptr->status & (BIT(F_CSTAT_FAIL))) != 0) {
-		LOG_ERR("Cadence status operation failed %s", __func__);
+		LOG_ERR("Cadence status operation failed %llx", desc_ptr->status);
 		return -EIO;
 	}
 #endif
@@ -591,7 +619,7 @@ static int cdns_nand_send(uintptr_t base_address, char *desc_ptr, uint8_t thread
 	uint32_t status;
 	int ret;
 
-	desc_address = (uint64_t)desc_ptr;
+	desc_address = k_mem_phys_addr(desc_ptr);
 
 	ret = cdns_wait_for_thread(base_address, thread);
 
@@ -617,57 +645,55 @@ static int cdns_cdma_desc_transfer_finish(struct cadence_nand_params *params, ui
 	uint32_t page_count_pass = 0;
 	uint32_t row_address = 0;
 	uint32_t base_address;
-	uint32_t page_buffer_size;
-	struct cdns_cdma_command_descriptor *cdma_desc;
 	int ret;
 
-	page_buffer_size = (page_count > max_page_desc) ? max_page_desc : page_count;
-
-	cdma_desc = k_malloc(sizeof(struct cdns_cdma_command_descriptor) * page_buffer_size);
-
-	if (cdma_desc == NULL) {
-		LOG_ERR("Memory allocation error occurred %s", __func__);
-		return -ENOSR;
+	if (max_page_desc > CDNS_NAND_CDMA_DESC_MAX) {
+		LOG_ERR("CDMA descriptor count exceeds static buffer");
+		return -EINVAL;
 	}
 
 	base_address = params->nand_base;
 
 	while (page_count > 0) {
-		row_address_set(params, &row_address, cond_start);
+		uint32_t batch_start = cond_start;
+		uint32_t addr_step = (ctype == CNF_CMD_ERASE) ? params->npages_per_block : 1U;
 
 		if (page_count > max_page_desc) {
 			page_count_pass = max_page_desc;
 			page_count = page_count - max_page_desc;
-			cond_start = cond_start + page_count_pass;
 		} else {
 			page_count_pass = page_count;
-			page_count = page_count - page_count_pass;
+			page_count = 0;
 		}
+		cond_start = batch_start + (page_count_pass * addr_step);
+
 		for (int index = 0; index < page_count_pass; index++) {
-			cdns_nand_cdma_prepare(NF_TDEF_DEV_NUM, row_address, buffer,
-					       (ctype + index), (page_count_pass - index),
-					       DMA_MS_SEL, VOL_ID, (cdma_desc + index));
+			char *page_buf = NULL;
+
+			row_address_set(params, &row_address, batch_start + (index * addr_step));
+			if (ctype != CNF_CMD_ERASE && buffer != NULL) {
+				page_buf = buffer + (index * params->page_size);
+			}
+			cdns_nand_cdma_prepare(NF_TDEF_DEV_NUM, row_address, page_buf,
+					       ctype, (page_count_pass - index),
+					       DMA_MS_SEL, VOL_ID, &params->cdma_desc[index]);
 		}
-		ret = cdns_nand_send(base_address, (char *)cdma_desc, NF_TDEF_TRD_NUM);
+		ret = cdns_nand_send(base_address, (char *)params->cdma_desc, NF_TDEF_TRD_NUM);
 
 		if (ret != 0) {
-			k_free(cdma_desc);
 			return ret;
 		}
 
-		if (ctype != CNF_CMD_ERASE) {
-			buffer = buffer + (max_page_desc * params->page_size);
+		if (ctype != CNF_CMD_ERASE && buffer != NULL) {
+			buffer = buffer + (page_count_pass * params->page_size);
 		}
 
-		ret = cdns_transfer_complete(cdma_desc, params);
+		ret = cdns_transfer_complete(params->cdma_desc, params);
 
 		if (ret != 0) {
-			k_free(cdma_desc);
 			return ret;
 		}
 	}
-
-	k_free(cdma_desc);
 
 	return 0;
 }
@@ -1269,12 +1295,11 @@ int cdns_nand_read(struct cadence_nand_params *params, const void *buffer, uint3
 {
 	uint32_t page_number;
 	uint32_t end_page_number;
-	uint8_t *page;
 	int page_offset;
 	int num_bytes;
-	int alloc_page_size = params->page_size + params->spare_size;
+	int page_buf_size;
 	int ret = 0;
-	char *ptr = (char*)buffer;
+	char *ptr = (char *)buffer;
 	uint32_t rem_bytes = size;
 
 	if (params == NULL) {
@@ -1291,36 +1316,37 @@ int cdns_nand_read(struct cadence_nand_params *params, const void *buffer, uint3
 		return -EINVAL;
 	}
 
-	page = nand_dma_alloc(alloc_page_size);
-	if (page == NULL) {
-		LOG_ERR("Memory allocation error occurred %s", __func__);
-		return -ENOSR;
+	page_buf_size = params->page_size + params->spare_size;
+	if (page_buf_size > CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE) {
+		LOG_ERR("Page+spare %d exceeds static buffer %d", page_buf_size,
+			CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE);
+		return -ENOMEM;
 	}
 
 	page_number = offset / (params->page_size);
 	end_page_number = ((offset + size) - 1) / ((params->page_size));
 	page_offset = offset % (params->page_size);
 	while (page_number <= end_page_number) {
-		memset(page, 0xFF, alloc_page_size);
-		sys_cache_data_flush_range(page, alloc_page_size);
-		ret = cdns_read_data(params, page_number, page, 1);
+		size_t cache_len = ROUND_UP(page_buf_size, CDNS_NAND_DMA_ALIGN);
+
+		memset(params->page_buf, 0xFF, cache_len);
+		sys_cache_data_flush_and_invd_range(params->page_buf, cache_len);
+		ret = cdns_read_data(params, page_number, params->page_buf, 1);
 
 		if (ret != 0) {
 			LOG_ERR("Cadence driver read Failed!!!");
 			break;
 		}
 
-		sys_cache_data_invd_range(page, alloc_page_size);
+		sys_cache_data_invd_range(params->page_buf, cache_len);
 		num_bytes = MIN(params->page_size - page_offset, rem_bytes);
-		memcpy(ptr, page + page_offset, num_bytes);
+		memcpy(ptr, params->page_buf + page_offset, num_bytes);
 		ptr += num_bytes;
 		rem_bytes -= num_bytes;
 
 		page_offset = 0;
 		page_number++;
 	}
-
-	k_free(page);
 
 	return ret;
 }
@@ -1339,10 +1365,9 @@ int cdns_nand_write(struct cadence_nand_params *params, const void *buffer, uint
 {
 	uint32_t page_number;
 	uint32_t end_page_number;
-	uint8_t *page;
 	int ret = 0;
-	char *ptr = (char*)buffer;
-	int alloc_page_size = params->page_size + params->spare_size;
+	char *ptr = (char *)buffer;
+	int page_buf_size;
 
 	if (params == NULL) {
 		LOG_ERR("Wrong parameter passed!!");
@@ -1368,19 +1393,23 @@ int cdns_nand_write(struct cadence_nand_params *params, const void *buffer, uint
 		return -EINVAL;
 	}
 
-	page = (char *)k_malloc(alloc_page_size);
-	if (page == NULL) {
-		LOG_ERR("Memory allocation error occurred %s", __func__);
-		return -ENOSR;
+	page_buf_size = params->page_size + params->spare_size;
+	if (page_buf_size > CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE) {
+		LOG_ERR("Page+spare %d exceeds static buffer %d", page_buf_size,
+			CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE);
+		return -ENOMEM;
 	}
 
 	page_number = offset / (params->page_size);
 	end_page_number = ((offset + len) - 1) / ((params->page_size));
 	while (page_number <= end_page_number) {
-		memcpy(page, ptr, params->page_size);
-		memset(page + params->page_size, 0xff, params->spare_size);
-		sys_cache_data_flush_range(page, alloc_page_size);
-		ret = cdns_write_data(params, page_number, page, 1);
+		size_t cache_len = ROUND_UP(page_buf_size, CDNS_NAND_DMA_ALIGN);
+
+		memcpy(params->page_buf, ptr, params->page_size);
+		memset(params->page_buf + params->page_size, 0xff,
+		       cache_len - params->page_size);
+		sys_cache_data_flush_range(params->page_buf, cache_len);
+		ret = cdns_write_data(params, page_number, params->page_buf, 1);
 
 		if (ret != 0) {
 			LOG_ERR("Cadence driver write Failed!!!");
@@ -1390,8 +1419,6 @@ int cdns_nand_write(struct cadence_nand_params *params, const void *buffer, uint
 		ptr += params->page_size;
 		page_number++;
 	}
-
-	k_free(page);
 
 	return ret;
 }
@@ -1439,12 +1466,12 @@ int cdns_nand_erase(struct cadence_nand_params *params, uint32_t offset, uint32_
 	end_block_number =
 		(((offset + size) - 1) / ((params->page_size))) / (params->npages_per_block);
 	while (block_number <= end_block_number) {
-	
 		page_number = block_number * params->npages_per_block;
 		ret = cdns_erase_block(params, page_number, 1);
 
 		if (ret != 0) {
 			LOG_ERR("Cadence driver Erase Failed!!!");
+			break;
 		}
 		block_number++;
 	}

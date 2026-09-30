@@ -57,14 +57,17 @@
 	status = "okay";
 };
 
+/* Disabled while NAND is selected; re-enable with
+ * CONFIG_SHELL_MODULE_STORAGE_SDMMC=y and status = "okay".
+ */
 &sdmmc {
-	status = "okay";
+	status = "disabled";
 
 	mmc {
 		/*SD Disk Access */
 		compatible = "zephyr,sdmmc-disk";
 		disk-name = "SD";
-		status = "okay";
+		status = "disabled";
 	};
 };
 

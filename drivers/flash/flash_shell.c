@@ -457,10 +457,8 @@ static int cmd_write_test(const struct shell *sh, size_t argc, char *argv[])
 		return result;
 	}
 
-	uint8_t *va;
-        device_map((mm_reg_t *)&va, 0x80700000, size, K_MEM_CACHE_NONE);
 	for (uint32_t i = 0; i < size; i++) {
-		test_arr[i] = va[i];
+		test_arr[i] = (uint8_t)i;
 	}
 
 	while (repeat--) {

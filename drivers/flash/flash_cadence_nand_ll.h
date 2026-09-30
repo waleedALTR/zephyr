@@ -10,6 +10,7 @@
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
 
 #define NAND_INT_SEM_TAKE(param_ptr)						\
 		COND_CODE_1(IS_ENABLED(CONFIG_CDNS_NAND_INTERRUPT_SUPPORT),     \
@@ -77,6 +78,41 @@
 #define CNF_CTRLCFG_FIFO_TLEVEL				(0x454)
 
 #define CNF_CTRLCFG(_base, _reg)			(_base + (CNF_CTRLCFG_##_reg))
+
+/*
+ * Transfer / ECC / skip settings — ATF-compatible naming and packing
+ * (arm-trusted-firmware cdns_nand.h) so Zephyr programs the same register
+ * layout and does not fight ATF’s prior configuration when geometry matches.
+ */
+#define CNF_ECC_EN					BIT(0)
+#define CNF_ECC_ERASE_DET_EN				BIT(1)
+#define CNF_ECC_CORR_STR_MASK				GENMASK(10, 8)
+#define CNF_ECC_CORR_STR				(0x02)
+#define CNF_ECC_CFG0_VAL							\
+	((CNF_ECC_EN) | (CNF_ECC_ERASE_DET_EN) |				\
+	 (FIELD_PREP(CNF_ECC_CORR_STR_MASK, CNF_ECC_CORR_STR)))
+#define CNF_ECC_CFG1_VAL				(0x20)
+
+#define CNF_SECTOR_CNT					(0x04)
+#define CNF_SECTOR_OFFSET_MASK				GENMASK(31, 16)
+#define CNF_SECTOR_OFFSET				(0x00)
+#define CNF_TRANS_CFG0_VAL							\
+	((CNF_SECTOR_CNT) |							\
+	 (FIELD_PREP(CNF_SECTOR_OFFSET_MASK, CNF_SECTOR_OFFSET)))
+
+#define CNF_SECTOR_SIZE					(0x0800)
+#define CNF_LAST_SECTOR_MASK				GENMASK(31, 16)
+#define CNF_LAST_SECTOR_SIZE				(0x0828)
+#define CNF_TRANS_CFG1_VAL							\
+	((CNF_SECTOR_SIZE) |							\
+	 (FIELD_PREP(CNF_LAST_SECTOR_MASK, CNF_LAST_SECTOR_SIZE)))
+
+#define CNF_NSKIP_BYTES					(0x02)
+#define CNF_MARKER_VAL					(0xFFFF)
+#define CNF_MARKER_MASK					GENMASK(31, 16)
+#define CNF_SKIP_BYTES_CFG_VAL							\
+	((CNF_NSKIP_BYTES) | (FIELD_PREP(CNF_MARKER_MASK, CNF_MARKER_VAL)))
+#define CNF_SKIP_BYTES_OFFSET_VAL			(0x00002000)
 
 /* Data integrity registers */
 #define CNF_DI_PAR_EN					(0)
@@ -336,6 +372,13 @@ struct cdns_cdma_command_descriptor {
 
 } __aligned(64);
 
+#define CDNS_NAND_DMA_ALIGN 64
+
+#if CONFIG_CDNS_NAND_CDMA_MODE
+#define CDNS_NAND_CDMA_DESC_MAX                                                            \
+	MAX(CONFIG_FLASH_CDNS_CDMA_PAGE_COUNT, CONFIG_FLASH_CDNS_CDMA_BLOCK_COUNT)
+#endif
+
 /* Row Address */
 union row_address {
 	struct {
@@ -367,7 +410,13 @@ struct cadence_nand_params {
 #ifdef CONFIG_CDNS_NAND_INTERRUPT_SUPPORT
 	struct k_sem interrupt_sem_t;
 #endif
-} __aligned(32);
+	/* Per-device cache-aligned DMA working buffers */
+	uint8_t page_buf[CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE] __aligned(CDNS_NAND_DMA_ALIGN);
+#if CONFIG_CDNS_NAND_CDMA_MODE
+	struct cdns_cdma_command_descriptor cdma_desc[CDNS_NAND_CDMA_DESC_MAX]
+		__aligned(CDNS_NAND_DMA_ALIGN);
+#endif
+} __aligned(CDNS_NAND_DMA_ALIGN);
 
 /* Global function Api */
 int cdns_nand_init(struct cadence_nand_params *params);
