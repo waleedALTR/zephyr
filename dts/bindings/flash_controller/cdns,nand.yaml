@@ -20,3 +20,16 @@ properties:
     type: int
     required: true
     description: Erase Block size of Cadence Nand
+
+  clock-frequency:
+    type: int
+    description: |
+      NAND flash controller clock frequency in Hz. Used by
+      cadence_setup_data_interface to derive TIMINGS*/PHY values.
+      Default 100000000 if omitted.
+
+  cdns,board-delay-ps:
+    type: int
+    description: |
+      Round-trip board delay in picoseconds (U-Boot cdns,board-delay-ps).
+      Default 4830 if omitted.

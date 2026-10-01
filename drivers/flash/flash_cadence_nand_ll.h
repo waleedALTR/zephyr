@@ -298,8 +298,44 @@
 #define PHY_DQS_TIMING_REG_OFFSET			(0x00002004)
 #define PHY_GATE_LPBK_OFFSET				(0x00002008)
 #define PHY_DLL_MASTER_OFFSET				(0x0000200c)
+#define PHY_DLL_SLAVE_OFFSET				(0x00002010)
 #define PHY_CTRL_REG_OFFSET				(0x00002080)
 #define PHY_TSEL_REG_OFFSET				(0x00002084)
+
+/* Timing register fields (U-Boot cadence-nand.h) */
+#define CNF_ASYNC_TOGGLE_TRH				GENMASK(28, 24)
+#define CNF_ASYNC_TOGGLE_TRP				GENMASK(20, 16)
+#define CNF_ASYNC_TOGGLE_TWH				GENMASK(12, 8)
+#define CNF_ASYNC_TOGGLE_TWP				GENMASK(4, 0)
+#define CNF_TIMINGS0_TADL				GENMASK(31, 24)
+#define CNF_TIMINGS0_TCCS				GENMASK(23, 16)
+#define CNF_TIMINGS0_TWHR				GENMASK(15, 8)
+#define CNF_TIMINGS0_TRHW				GENMASK(7, 0)
+#define CNF_TIMINGS1_TRHZ				GENMASK(31, 24)
+#define CNF_TIMINGS1_TWB				GENMASK(23, 16)
+#define CNF_TIMINGS1_TVDLY				GENMASK(7, 0)
+#define CNF_TIMINGS2_TFEAT				GENMASK(25, 16)
+#define CNF_TIMINGS2_CS_HOLD				GENMASK(13, 8)
+#define CNF_TIMINGS2_CS_SETUP				GENMASK(5, 0)
+#define CNF_DLL_PHY_CTRL_DLL_RST_N			BIT(24)
+#define CNF_DLL_PHY_CTRL_EXT_WR				BIT(17)
+#define CNF_DLL_PHY_CTRL_EXT_RD				BIT(16)
+#define CNF_DLL_PHY_CTRL_RS_HIGH_WAIT			GENMASK(11, 8)
+#define CNF_DLL_PHY_CTRL_RS_IDLE			GENMASK(7, 0)
+#define CNF_PHY_DQS_SEL_OE_END				GENMASK(3, 0)
+#define CNF_PHY_DQS_PHONY_DQS_SEL			BIT(16)
+#define CNF_PHY_DQS_USE_PHONY_DQS			BIT(20)
+#define CNF_PHY_GATE_LPBK_RDS				GENMASK(24, 19)
+#define CNF_PHY_CTRL_SDR_DQS				BIT(14)
+#define CNF_PHY_CTRL_PHONY_DQS				GENMASK(9, 4)
+#define CNF_PHY_DLL_MASTER_BYPASS			BIT(23)
+
+#define CNF_HW_NVDDR_SUPPORT(x)				\
+	((FIELD_GET(BIT(28), (x)) != 0U) || (FIELD_GET(BIT(27), (x)) != 0U))
+
+/* Defaults match U-Boot Agilex5 (cdns,board-delay-ps / nf clock) */
+#define CNF_DEFAULT_BOARD_DELAY_PS			(4830U)
+#define CNF_DEFAULT_NF_CLK_RATE_HZ			(100000000U)
 
 #define PHY_CTRL_REG_SDR				(0x00004040)
 #define PHY_TSEL_REG_SDR				(0x00000000)
@@ -425,6 +461,9 @@ struct cadence_nand_params {
 	uint8_t lun_size_bit;
 	size_t page_count;
 	unsigned long long device_size;
+	/* NF clock (Hz) and board delay (ps) for cadence_setup_data_interface */
+	uint32_t nf_clk_rate;
+	uint32_t board_delay_ps;
 #ifdef CONFIG_CDNS_NAND_INTERRUPT_SUPPORT
 	struct k_sem interrupt_sem_t;
 #endif

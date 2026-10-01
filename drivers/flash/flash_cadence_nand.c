@@ -261,6 +261,10 @@ static int flash_cdns_nand_init(const struct device *nand_dev)
 	struct flash_cadence_nand_data flash_cadence_nand_data_##inst = {                          \
 		.params = {                                                                        \
 			.datarate_mode = DT_INST_PROP(inst, data_rate_mode),                       \
+			.nf_clk_rate = DT_INST_PROP_OR(inst, clock_frequency,                      \
+						       CNF_DEFAULT_NF_CLK_RATE_HZ),                \
+			.board_delay_ps = DT_INST_PROP_OR(inst, cdns_board_delay_ps,               \
+							  CNF_DEFAULT_BOARD_DELAY_PS),             \
 		}};                                                                                \
 	const struct flash_cadence_nand_config flash_cadence_nand_config_##inst = {                \
 		DEVICE_MMIO_NAMED_ROM_INIT_BY_NAME(nand_reg, DT_DRV_INST(inst)),                   \

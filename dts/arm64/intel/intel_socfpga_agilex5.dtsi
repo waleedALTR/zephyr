@@ -308,6 +308,8 @@
 			 <&reset RSTMGR_SOFTPHY_RSTLINE>;
 		block-size = <0x20000>;
 		data-rate-mode = <0>;
+		clock-frequency = <100000000>;
+		cdns,board-delay-ps = <4830>;
 		status = "disabled";
 	};
 

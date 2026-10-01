@@ -233,103 +233,457 @@ static int cdns_pio_transfer_complete(uintptr_t base_address, uint8_t thread)
 }
 #endif
 
+/*
+ * ONFI SDR timing modes 0–5 (picoseconds). Fields used by
+ * cadence_setup_data_interface only; from U-Boot nand_timings.c.
+ */
+struct cdns_nand_sdr_timings {
+	uint32_t tCCS_min;
+	uint32_t tADL_min;
+	uint32_t tALS_min;
+	uint32_t tCEH_min;
+	uint32_t tCS_min;
+	uint32_t tFEAT_max;
+	uint32_t tRC_min;
+	uint32_t tREA_max;
+	uint32_t tREH_min;
+	uint32_t tRHOH_min;
+	uint32_t tRHW_min;
+	uint32_t tRHZ_max;
+	uint32_t tRP_min;
+	uint32_t tWB_max;
+	uint32_t tWC_min;
+	uint32_t tWH_min;
+	uint32_t tWHR_min;
+	uint32_t tWP_min;
+};
+
+static const struct cdns_nand_sdr_timings onfi_sdr_timings[] = {
+	{ /* mode 0 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 50000,
+		.tCEH_min = 20000, .tCS_min = 70000, .tFEAT_max = 1000000,
+		.tRC_min = 100000, .tREA_max = 40000, .tREH_min = 30000,
+		.tRHOH_min = 0, .tRHW_min = 200000, .tRHZ_max = 200000,
+		.tRP_min = 50000, .tWB_max = 200000, .tWC_min = 100000,
+		.tWH_min = 30000, .tWHR_min = 120000, .tWP_min = 50000,
+	},
+	{ /* mode 1 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 25000,
+		.tCEH_min = 20000, .tCS_min = 35000, .tFEAT_max = 1000000,
+		.tRC_min = 50000, .tREA_max = 30000, .tREH_min = 15000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 25000, .tWB_max = 100000, .tWC_min = 45000,
+		.tWH_min = 15000, .tWHR_min = 80000, .tWP_min = 25000,
+	},
+	{ /* mode 2 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 15000,
+		.tCEH_min = 20000, .tCS_min = 25000, .tFEAT_max = 1000000,
+		.tRC_min = 35000, .tREA_max = 25000, .tREH_min = 15000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 17000, .tWB_max = 100000, .tWC_min = 35000,
+		.tWH_min = 15000, .tWHR_min = 80000, .tWP_min = 17000,
+	},
+	{ /* mode 3 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 10000,
+		.tCEH_min = 20000, .tCS_min = 25000, .tFEAT_max = 1000000,
+		.tRC_min = 30000, .tREA_max = 20000, .tREH_min = 10000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 15000, .tWB_max = 100000, .tWC_min = 30000,
+		.tWH_min = 10000, .tWHR_min = 80000, .tWP_min = 15000,
+	},
+	{ /* mode 4 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 10000,
+		.tCEH_min = 20000, .tCS_min = 20000, .tFEAT_max = 1000000,
+		.tRC_min = 25000, .tREA_max = 20000, .tREH_min = 10000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 12000, .tWB_max = 100000, .tWC_min = 25000,
+		.tWH_min = 10000, .tWHR_min = 80000, .tWP_min = 12000,
+	},
+	{ /* mode 5 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 10000,
+		.tCEH_min = 20000, .tCS_min = 15000, .tFEAT_max = 1000000,
+		.tRC_min = 20000, .tREA_max = 16000, .tREH_min = 7000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 10000, .tWB_max = 100000, .tWC_min = 20000,
+		.tWH_min = 7000, .tWHR_min = 80000, .tWP_min = 10000,
+	},
+};
+
+struct cadence_nand_timings {
+	uint32_t async_toggle_timings;
+	uint32_t timings0;
+	uint32_t timings1;
+	uint32_t timings2;
+	uint32_t dll_phy_ctrl;
+	uint32_t phy_ctrl;
+	uint32_t phy_dqs_timing;
+	uint32_t phy_gate_lpbk_ctrl;
+};
+
+static int calc_cycl(uint32_t timing, uint32_t clock)
+{
+	if ((timing == 0U) || (clock == 0U)) {
+		return 0;
+	}
+
+	if ((timing % clock) > 0U) {
+		return (int)(timing / clock);
+	}
+
+	return (int)(timing / clock) - 1;
+}
+
+static inline uint32_t calc_tdvw_max(uint32_t trp_cnt, uint32_t clk_period,
+				     uint32_t trhoh_min, uint32_t board_delay_skew_min,
+				     uint32_t ext_mode)
+{
+	if (ext_mode == 0U) {
+		clk_period /= 2U;
+	}
+
+	return (trp_cnt + 1U) * clk_period + trhoh_min + board_delay_skew_min;
+}
+
+static inline uint32_t calc_tdvw(uint32_t trp_cnt, uint32_t clk_period,
+				 uint32_t trhoh_min, uint32_t trea_max, uint32_t ext_mode)
+{
+	if (ext_mode == 0U) {
+		clk_period /= 2U;
+	}
+
+	return (trp_cnt + 1U) * clk_period + trhoh_min - trea_max;
+}
+
+static inline bool cdns_field_fit(uint32_t mask, uint32_t val)
+{
+	uint32_t max = mask >> __builtin_ctz(mask);
+
+	return val <= max;
+}
+
+/**
+ * Port of U-Boot cadence_setup_data_interface() for ONFI SDR timing @mode.
+ */
+static int cdns_nand_setup_data_interface(struct cadence_nand_params *params,
+					  int mode, bool is_phy_type_dll,
+					  struct cadence_nand_timings *t)
+{
+	const struct cdns_nand_sdr_timings *sdr;
+	uint32_t board_delay = params->board_delay_ps;
+	uint32_t nf_clk = params->nf_clk_rate;
+	uint32_t clk_period;
+	uint32_t if_skew = 0U;
+	uint32_t board_delay_skew_min;
+	uint32_t board_delay_skew_max;
+	uint32_t tceh_cnt, tcs_cnt, tadl_cnt, tccs_cnt;
+	uint32_t tfeat_cnt, trhz_cnt, tvdly_cnt;
+	uint32_t trhw_cnt, twb_cnt, twh_cnt = 0U, twhr_cnt;
+	uint32_t twp_cnt = 0U, trp_cnt = 0U, trh_cnt = 0U;
+	uint32_t dqs_sampl_res, phony_dqs_mod;
+	uint32_t tdvw, tdvw_min, tdvw_max;
+	uint32_t ext_rd_mode, ext_wr_mode;
+	uint32_t dll_phy_dqs_timing = 0U, phony_dqs_timing = 0U, rd_del_sel = 0U;
+	uint32_t sampling_point;
+	uint32_t reg;
+
+	if ((mode < 0) || (mode >= (int)ARRAY_SIZE(onfi_sdr_timings))) {
+		return -EINVAL;
+	}
+
+	if (nf_clk == 0U) {
+		nf_clk = CNF_DEFAULT_NF_CLK_RATE_HZ;
+	}
+	if (board_delay == 0U) {
+		board_delay = CNF_DEFAULT_BOARD_DELAY_PS;
+	}
+
+	sdr = &onfi_sdr_timings[mode];
+	clk_period = (uint32_t)(1000000000000ULL / nf_clk);
+	board_delay_skew_min = board_delay - if_skew;
+	board_delay_skew_max = board_delay + if_skew;
+
+	(void)memset(t, 0, sizeof(*t));
+
+	phony_dqs_mod = is_phy_type_dll ? 2U : 1U;
+	dqs_sampl_res = clk_period / phony_dqs_mod;
+	tdvw_min = sdr->tREA_max + board_delay_skew_max;
+
+	if ((sdr->tRC_min <= clk_period) &&
+	    (sdr->tRP_min <= (clk_period / 2U)) &&
+	    (sdr->tREH_min <= (clk_period / 2U))) {
+		ext_rd_mode = 0U;
+		tdvw = calc_tdvw(trp_cnt, clk_period, sdr->tRHOH_min,
+				 sdr->tREA_max, ext_rd_mode);
+		tdvw_max = calc_tdvw_max(trp_cnt, clk_period, sdr->tRHOH_min,
+					 board_delay_skew_min, ext_rd_mode);
+		if (tdvw > 0U) {
+			if ((tdvw_max <= tdvw_min) || ((tdvw_max % dqs_sampl_res) == 0U)) {
+				ext_rd_mode = 1U;
+			}
+		} else {
+			trp_cnt = (sdr->tREA_max + board_delay_skew_max + dqs_sampl_res) /
+				  clk_period;
+			ext_rd_mode = 1U;
+		}
+	} else {
+		uint32_t trh;
+
+		ext_rd_mode = 1U;
+		trp_cnt = (uint32_t)calc_cycl(sdr->tRP_min, clk_period);
+		trh = sdr->tRC_min - ((trp_cnt + 1U) * clk_period);
+		if (sdr->tREH_min >= trh) {
+			trh_cnt = (uint32_t)calc_cycl(sdr->tREH_min, clk_period);
+		} else {
+			trh_cnt = (uint32_t)calc_cycl(trh, clk_period);
+		}
+
+		tdvw = calc_tdvw(trp_cnt, clk_period, sdr->tRHOH_min,
+				 sdr->tREA_max, ext_rd_mode);
+		if (tdvw > 0U) {
+			tdvw_max = calc_tdvw_max(trp_cnt, clk_period, sdr->tRHOH_min,
+						 board_delay_skew_min, ext_rd_mode);
+			if ((((tdvw_max / dqs_sampl_res) * dqs_sampl_res) <= tdvw_min) ||
+			    (((tdvw_max % dqs_sampl_res) == 0U) &&
+			     ((((tdvw_max / dqs_sampl_res) - 1U) * dqs_sampl_res) <= tdvw_min))) {
+				trp_cnt = trp_cnt + 1U;
+			}
+		} else {
+			trp_cnt = (sdr->tREA_max + board_delay_skew_max + dqs_sampl_res) /
+				  clk_period;
+		}
+	}
+
+	tdvw_max = calc_tdvw_max(trp_cnt, clk_period, sdr->tRHOH_min,
+				 board_delay_skew_min, ext_rd_mode);
+
+	if ((sdr->tWC_min <= clk_period) &&
+	    ((sdr->tWP_min + if_skew) <= (clk_period / 2U)) &&
+	    ((sdr->tWH_min + if_skew) <= (clk_period / 2U))) {
+		ext_wr_mode = 0U;
+	} else {
+		uint32_t twh;
+
+		ext_wr_mode = 1U;
+		twp_cnt = (uint32_t)calc_cycl(sdr->tWP_min + if_skew, clk_period);
+		if (((twp_cnt + 1U) * clk_period) < (sdr->tALS_min + if_skew)) {
+			twp_cnt = (uint32_t)calc_cycl(sdr->tALS_min + if_skew, clk_period);
+		}
+
+		twh = sdr->tWC_min - (twp_cnt + 1U) * clk_period;
+		if (sdr->tWH_min >= twh) {
+			twh = sdr->tWH_min;
+		}
+		twh_cnt = (uint32_t)calc_cycl(twh + if_skew, clk_period);
+	}
+
+	reg = FIELD_PREP(CNF_ASYNC_TOGGLE_TRH, trh_cnt) |
+	      FIELD_PREP(CNF_ASYNC_TOGGLE_TRP, trp_cnt) |
+	      FIELD_PREP(CNF_ASYNC_TOGGLE_TWH, twh_cnt) |
+	      FIELD_PREP(CNF_ASYNC_TOGGLE_TWP, twp_cnt);
+	t->async_toggle_timings = reg;
+
+	tadl_cnt = (uint32_t)calc_cycl(sdr->tADL_min + if_skew, clk_period);
+	tccs_cnt = (uint32_t)calc_cycl(sdr->tCCS_min + if_skew, clk_period);
+	twhr_cnt = (uint32_t)calc_cycl(sdr->tWHR_min + if_skew, clk_period);
+	trhw_cnt = (uint32_t)calc_cycl(sdr->tRHW_min + if_skew, clk_period);
+	reg = FIELD_PREP(CNF_TIMINGS0_TADL, tadl_cnt);
+	if (cdns_field_fit(CNF_TIMINGS0_TCCS, tccs_cnt)) {
+		reg |= FIELD_PREP(CNF_TIMINGS0_TCCS, tccs_cnt);
+	} else {
+		reg |= CNF_TIMINGS0_TCCS;
+	}
+	reg |= FIELD_PREP(CNF_TIMINGS0_TWHR, twhr_cnt) |
+	       FIELD_PREP(CNF_TIMINGS0_TRHW, trhw_cnt);
+	t->timings0 = reg;
+
+	trhz_cnt = (uint32_t)calc_cycl(sdr->tRHZ_max, clk_period) + 1U;
+	twb_cnt = (uint32_t)calc_cycl(sdr->tWB_max + board_delay, clk_period) + 3U + 5U;
+	tvdly_cnt = (uint32_t)calc_cycl(500000U + if_skew, clk_period);
+	t->timings1 = FIELD_PREP(CNF_TIMINGS1_TRHZ, trhz_cnt) |
+		      FIELD_PREP(CNF_TIMINGS1_TWB, twb_cnt) |
+		      FIELD_PREP(CNF_TIMINGS1_TVDLY, tvdly_cnt);
+
+	tfeat_cnt = (uint32_t)calc_cycl(sdr->tFEAT_max, clk_period);
+	if (tfeat_cnt < twb_cnt) {
+		tfeat_cnt = twb_cnt;
+	}
+	tceh_cnt = (uint32_t)calc_cycl(sdr->tCEH_min, clk_period);
+	tcs_cnt = (uint32_t)calc_cycl(sdr->tCS_min + if_skew, clk_period);
+	t->timings2 = FIELD_PREP(CNF_TIMINGS2_TFEAT, tfeat_cnt) |
+		      FIELD_PREP(CNF_TIMINGS2_CS_HOLD, tceh_cnt) |
+		      FIELD_PREP(CNF_TIMINGS2_CS_SETUP, tcs_cnt);
+
+	if (is_phy_type_dll) {
+		reg = CNF_DLL_PHY_CTRL_DLL_RST_N;
+		if (ext_wr_mode != 0U) {
+			reg |= CNF_DLL_PHY_CTRL_EXT_WR;
+		}
+		if (ext_rd_mode != 0U) {
+			reg |= CNF_DLL_PHY_CTRL_EXT_RD;
+		}
+		reg |= FIELD_PREP(CNF_DLL_PHY_CTRL_RS_HIGH_WAIT, 7U) |
+		       FIELD_PREP(CNF_DLL_PHY_CTRL_RS_IDLE, 7U);
+		t->dll_phy_ctrl = reg;
+	}
+
+	if ((tdvw_max % dqs_sampl_res) > 0U) {
+		sampling_point = tdvw_max / dqs_sampl_res;
+	} else {
+		sampling_point = (tdvw_max / dqs_sampl_res) - 1U;
+	}
+
+	if ((sampling_point * dqs_sampl_res) > tdvw_min) {
+		dll_phy_dqs_timing = FIELD_PREP(CNF_PHY_DQS_SEL_OE_END, 4U) |
+				    CNF_PHY_DQS_USE_PHONY_DQS;
+		phony_dqs_timing = sampling_point / phony_dqs_mod;
+
+		if ((sampling_point % 2U) > 0U) {
+			dll_phy_dqs_timing |= CNF_PHY_DQS_PHONY_DQS_SEL;
+			if ((tdvw_max % dqs_sampl_res) == 0U) {
+				phony_dqs_timing = (tdvw_max / dqs_sampl_res) /
+						   phony_dqs_mod - 1U;
+			}
+			if (!is_phy_type_dll) {
+				phony_dqs_timing--;
+			}
+		} else {
+			phony_dqs_timing--;
+		}
+		rd_del_sel = phony_dqs_timing + 3U;
+	} else {
+		LOG_WRN("No valid sampling point for ONFI SDR mode %d", mode);
+	}
+
+	reg = FIELD_PREP(CNF_PHY_CTRL_PHONY_DQS, phony_dqs_timing);
+	if (is_phy_type_dll) {
+		reg |= CNF_PHY_CTRL_SDR_DQS;
+	}
+	t->phy_ctrl = reg;
+
+	if (is_phy_type_dll) {
+		t->phy_dqs_timing = dll_phy_dqs_timing;
+		t->phy_gate_lpbk_ctrl = FIELD_PREP(CNF_PHY_GATE_LPBK_RDS, rd_del_sel);
+	}
+
+	LOG_INF("setup_data_interface mode=%d clk=%uHz period=%ups async=0x%x t0=0x%x t1=0x%x t2=0x%x",
+		mode, nf_clk, clk_period, t->async_toggle_timings, t->timings0,
+		t->timings1, t->timings2);
+
+	return 0;
+}
+
+static void cdns_nand_set_timings(struct cadence_nand_params *params,
+				  const struct cadence_nand_timings *t,
+				  bool is_phy_type_dll)
+{
+	uintptr_t base_address = params->nand_base;
+
+	sys_write32(t->async_toggle_timings,
+		    CNF_MINICTRL(base_address, ASYNC_TOGGLE_TIMINGS));
+	sys_write32(t->timings0, CNF_MINICTRL(base_address, TIMINGS0));
+	sys_write32(t->timings1, CNF_MINICTRL(base_address, TIMINGS1));
+	sys_write32(t->timings2, CNF_MINICTRL(base_address, TIMINGS2));
+
+	if (is_phy_type_dll) {
+		sys_write32(t->dll_phy_ctrl, CNF_MINICTRL(base_address, DLL_PHY_CTRL));
+	}
+
+	sys_write32(t->phy_ctrl, base_address + PHY_CTRL_REG_OFFSET);
+
+	if (is_phy_type_dll) {
+		sys_write32(0U, base_address + PHY_TSEL_REG_OFFSET);
+		sys_write32(2U, base_address + PHY_DQ_TIMING_REG_OFFSET);
+		sys_write32(t->phy_dqs_timing, base_address + PHY_DQS_TIMING_REG_OFFSET);
+		sys_write32(t->phy_gate_lpbk_ctrl, base_address + PHY_GATE_LPBK_OFFSET);
+		sys_write32(CNF_PHY_DLL_MASTER_BYPASS, base_address + PHY_DLL_MASTER_OFFSET);
+		sys_write32(0U, base_address + PHY_DLL_SLAVE_OFFSET);
+	}
+}
+
 /**
  * Set the operational mode for the Cadence NAND controller.
  *
- * @param base_address The base address of the Cadence NAND controller.
- * @param opr_mode The operational mode  SDR / NVDDR to set.
+ * @param params Cadence NAND parameters (base, clock, board delay).
+ * @param opr_mode The operational mode SDR / NVDDR to set.
  * @retval  0 on success or negative error value on failure.
  */
-static int cdns_nand_set_opr_mode(uintptr_t base_address, uint8_t opr_mode)
+static int cdns_nand_set_opr_mode(struct cadence_nand_params *params, uint8_t opr_mode)
 {
+	uintptr_t base_address = params->nand_base;
+	struct cadence_nand_timings timings;
 	uint8_t device_type;
 	uint32_t timing_mode = 0;
 	uint32_t status;
+	uint32_t features;
+	bool is_phy_type_dll;
 	int ret;
 
-	if (opr_mode == CNF_OPR_WORK_MODE_SDR) {
+	features = sys_read32(CNF_CTRLPARAM(base_address, FEATURE));
+	is_phy_type_dll = CNF_HW_NVDDR_SUPPORT(features) != 0U;
 
+	if (opr_mode == CNF_OPR_WORK_MODE_SDR) {
 		status = ONFI_TIMING_MODE_SDR(
 			sys_read32(CNF_CTRLPARAM(base_address, ONFI_TIMING_0)));
-		timing_mode = find_lsb_set(status) - 1;
+		/* Highest supported ONFI mode (U-Boot / Linux prefer fastest). */
+		timing_mode = find_msb_set(status);
+		if (timing_mode == 0U) {
+			timing_mode = 0U;
+		} else {
+			timing_mode -= 1U;
+		}
 
-		/* PHY Register Timing setting*/
-		sys_write32(PHY_CTRL_REG_SDR, (base_address + PHY_CTRL_REG_OFFSET));
-		sys_write32(PHY_TSEL_REG_SDR, (base_address + PHY_TSEL_REG_OFFSET));
-		sys_write32(PHY_DQ_TIMING_REG_SDR, (base_address + PHY_DQ_TIMING_REG_OFFSET));
-		sys_write32(PHY_DQS_TIMING_REG_SDR, (base_address + PHY_DQS_TIMING_REG_OFFSET));
-		sys_write32(PHY_GATE_LPBK_CTRL_REG_SDR, (base_address + PHY_GATE_LPBK_OFFSET));
-		sys_write32(PHY_DLL_MASTER_CTRL_REG_SDR, (base_address + PHY_DLL_MASTER_OFFSET));
+		ret = cdns_nand_setup_data_interface(params, (int)timing_mode,
+						     is_phy_type_dll, &timings);
+		if (ret != 0) {
+			LOG_ERR("setup_data_interface failed (%d), mode %u",
+				ret, timing_mode);
+			return ret;
+		}
+		cdns_nand_set_timings(params, &timings, is_phy_type_dll);
 
-		/* Async mode timing settings */
-		sys_write32((CNF_ASYNC_TIMINGS_TRH) | (CNF_ASYNC_TIMINGS_TRP) |
-				    (CNF_ASYNC_TIMINGS_TWH) | (CNF_ASYNC_TIMINGS_TWP),
-			    CNF_MINICTRL(base_address, ASYNC_TOGGLE_TIMINGS));
-
-		/* Set operation work mode in common settings */
 		sys_clear_bits(CNF_MINICTRL(base_address, CMN_SETTINGS),
 			       CNF_OPR_WORK_MODE_SDR_MASK);
-
 	} else {
-		/* NVDDR MODE */
+		/* NVDDR MODE — keep legacy PHY constants for now */
 		status = ONFI_TIMING_MODE_NVDDR(
 			sys_read32(CNF_CTRLPARAM(base_address, ONFI_TIMING_0)));
-		timing_mode = find_lsb_set(status) - 1;
-		/* PHY Register Timing setting*/
+		timing_mode = find_msb_set(status);
+		if (timing_mode != 0U) {
+			timing_mode -= 1U;
+		}
+
 		sys_write32(PHY_CTRL_REG_DDR, (base_address + PHY_CTRL_REG_OFFSET));
 		sys_write32(PHY_TSEL_REG_DDR, (base_address + PHY_TSEL_REG_OFFSET));
 		sys_write32(PHY_DQ_TIMING_REG_DDR, (base_address + PHY_DQ_TIMING_REG_OFFSET));
 		sys_write32(PHY_DQS_TIMING_REG_DDR, (base_address + PHY_DQS_TIMING_REG_OFFSET));
 		sys_write32(PHY_GATE_LPBK_CTRL_REG_DDR, (base_address + PHY_GATE_LPBK_OFFSET));
 		sys_write32(PHY_DLL_MASTER_CTRL_REG_DDR, (base_address + PHY_DLL_MASTER_OFFSET));
-		/* Set operation work mode in common settings */
 		sys_set_bits(CNF_MINICTRL(base_address, CMN_SETTINGS),
 			     CNF_OPR_WORK_MODE_NVDDR_MASK);
 	}
 
-	/* Wait for controller to be in idle state */
+	ARG_UNUSED(timing_mode);
+
 	ret = cdns_nand_wait_idle(base_address);
 	if (ret != 0) {
 		LOG_ERR("Wait for controller to be in idle state Failed");
 		return ret;
 	}
 
-	/* Check device type */
 	device_type = CNF_GET_DEV_TYPE(sys_read32(CNF_CTRLPARAM(base_address, DEV_PARAMS0)));
-
 	if (device_type != ONFI_INTERFACE) {
 		LOG_ERR("Driver does not support this interface");
 		return -ENOTSUP;
 	}
-	/* Reset DLL PHY */
+
 	sys_clear_bit(CNF_MINICTRL(base_address, DLL_PHY_CTRL), CNF_DLL_PHY_RST_N);
 
-	/* Wait for controller to be in idle state */
 	ret = cdns_nand_wait_idle(base_address);
 	if (ret != 0) {
 		LOG_ERR("Wait for controller to be in idle state Failed");
 		return ret;
 	}
-#if 0
-	ret = cdns_nand_pio_set_features(base_address, SET_FEAT_TIMING_MODE_ADDRESS, timing_mode,
-					 NF_TDEF_TRD_NUM, VOL_ID);
-	if (ret != 0) {
-		return ret;
-	}
 
-	ret = cdns_pio_transfer_complete(base_address, NF_TDEF_TRD_NUM);
-	if (ret != 0) {
-		LOG_ERR("cdns pio check failed");
-		return ret;
-	}
-
-	ret = cdns_nand_wait_idle(base_address);
-	if (ret != 0) {
-		LOG_ERR("Wait for controller to be in idle state Failed");
-		return ret;
-	}
-#endif
-	/* set dll_rst_n in dll_phy_ctrl to 1 */
 	sys_set_bit(CNF_MINICTRL(base_address, DLL_PHY_CTRL), CNF_DLL_PHY_RST_N);
 
 	ret = cdns_nand_wait_idle(base_address);
@@ -496,10 +850,7 @@ static int cdns_nand_transfer_config(struct cadence_nand_params *params)
 	sys_write32(CNF_SKIP_BYTES_CFG_VAL, CNF_MINICTRL(base_address, SKIP_BYTES_CFG));
 	sys_write32(skip_offset, CNF_MINICTRL(base_address, SKIP_BYTES_OFFSET));
 
-	sys_write32(0x04040404, CNF_MINICTRL(base_address, ASYNC_TOGGLE_TIMINGS));
-	sys_write32(0x27310b13, CNF_MINICTRL(base_address, TIMINGS0));
-	sys_write32(0x141c0031, CNF_MINICTRL(base_address, TIMINGS1));
-	sys_write32(0x00630106, CNF_MINICTRL(base_address, TIMINGS2));
+	/* TIMINGS and PHY programmed by cdns_nand_setup_data_interface() */
 
 	LOG_INF("TRANS_CFG0=0x%x TRANS_CFG1=0x%x (sec=%u cnt=%u last=%u)",
 		trans_cfg0, trans_cfg1, sector_size, sector_cnt, last_sector_size);
@@ -560,8 +911,8 @@ int cdns_nand_init(struct cadence_nand_params *params)
 	}
 	sys_write32(DEV_STAT_DEF_VALUE, CNF_CTRLCFG(base_address, DEV_STAT));
 #endif
-	/* Set operation work mode */
-	ret = cdns_nand_set_opr_mode(base_address, datarate_mode);
+	/* Set operation work mode (runs cadence_setup_data_interface for SDR) */
+	ret = cdns_nand_set_opr_mode(params, datarate_mode);
 	if (ret != 0) {
 		return ret;
 	}
