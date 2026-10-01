@@ -342,11 +342,103 @@ static int cdns_nand_set_opr_mode(uintptr_t base_address, uint8_t opr_mode)
 }
 
 /**
+ * ECC bytes per sector — same formula as U-Boot cadence_nand_calc_ecc_bytes().
+ * Depends on the controller's maximum BCH step size and the chosen strength.
+ */
+static uint32_t cdns_nand_calc_ecc_bytes(uint32_t max_step_size, uint32_t strength)
+{
+	uint32_t nbytes;
+
+	if ((max_step_size == 0U) || (strength == 0U)) {
+		return 0U;
+	}
+
+	nbytes = DIV_ROUND_UP(find_msb_set(8U * max_step_size) * strength, 8U);
+	return ROUND_UP(nbytes, 2U);
+}
+
+/**
+ * available_spare = spare_size - ecc_size, capped by BCH metadata size
+ * (U-Boot cadence_nand attach path). Used as OOB added to last_sector_size.
+ */
+static uint32_t cdns_nand_avail_spare(struct cadence_nand_params *params,
+				      uint32_t sector_cnt)
+{
+	uintptr_t base_address = params->nand_base;
+	uint32_t strengths[CNF_BCH_MAX_CORR_CAPS];
+	uint32_t max_step_size;
+	uint32_t strength;
+	uint32_t ecc_bytes;
+	uint32_t ecc_size;
+	uint32_t avail;
+	uint32_t metadata;
+	uint32_t reg;
+	uint32_t corr_idx = CNF_ECC_CORR_STR;
+
+	reg = sys_read32(CNF_CTRLPARAM(base_address, BCH_CFG0));
+	strengths[0] = FIELD_GET(CNF_BCH_CFG0_CORR_CAP_0, reg);
+	strengths[1] = FIELD_GET(CNF_BCH_CFG0_CORR_CAP_1, reg);
+	strengths[2] = FIELD_GET(CNF_BCH_CFG0_CORR_CAP_2, reg);
+	strengths[3] = FIELD_GET(CNF_BCH_CFG0_CORR_CAP_3, reg);
+
+	reg = sys_read32(CNF_CTRLPARAM(base_address, BCH_CFG1));
+	strengths[4] = FIELD_GET(CNF_BCH_CFG1_CORR_CAP_4, reg);
+	strengths[5] = FIELD_GET(CNF_BCH_CFG1_CORR_CAP_5, reg);
+	strengths[6] = FIELD_GET(CNF_BCH_CFG1_CORR_CAP_6, reg);
+	strengths[7] = FIELD_GET(CNF_BCH_CFG1_CORR_CAP_7, reg);
+
+	reg = sys_read32(CNF_CTRLPARAM(base_address, BCH_CFG2));
+	max_step_size = FIELD_GET(CNF_BCH_CFG2_SECT_0, reg);
+	reg = FIELD_GET(CNF_BCH_CFG2_SECT_1, reg);
+	if (reg > max_step_size) {
+		max_step_size = reg;
+	}
+
+	reg = sys_read32(CNF_CTRLPARAM(base_address, BCH_CFG3));
+	metadata = FIELD_GET(CNF_BCH_CFG3_METADATA_SIZE, reg);
+
+	if ((corr_idx >= CNF_BCH_MAX_CORR_CAPS) || (strengths[corr_idx] == 0U) ||
+	    (max_step_size == 0U) || (sector_cnt == 0U) ||
+	    (params->spare_size == 0U)) {
+		return 0U;
+	}
+
+	strength = strengths[corr_idx];
+	ecc_bytes = cdns_nand_calc_ecc_bytes(max_step_size, strength);
+	if (ecc_bytes == 0U) {
+		return 0U;
+	}
+
+	ecc_size = sector_cnt * ecc_bytes;
+	if (ecc_size >= params->spare_size) {
+		LOG_ERR("ECC size %u exceeds spare %u (str=%u step_max=%u)",
+			ecc_size, params->spare_size, strength, max_step_size);
+		return 0U;
+	}
+
+	avail = params->spare_size - ecc_size;
+	if ((metadata != 0U) && (avail > metadata)) {
+		avail = metadata;
+	}
+
+	/* Same BBM reservation check as U-Boot (bbm_len == skip marker bytes). */
+	if ((avail + CNF_NSKIP_BYTES + ecc_size) > params->spare_size) {
+		if (avail > 4U) {
+			avail -= 4U;
+		}
+	}
+
+	LOG_INF("BCH strength=%u max_step=%u ecc/sec=%u ecc_total=%u meta=%u avail_oob=%u",
+		strength, max_step_size, ecc_bytes, ecc_size, metadata, avail);
+
+	return avail;
+}
+
+/**
  * Configure the transfer settings of the Cadence NAND controller.
  *
- * Packs TRANS_CFG0/1 like ATF (cdns_nand.h). Sector count / last-sector size
- * are derived from discovered page/spare when they match ATF’s sector size
- * (0x800), so the programmed value stays compatible with ATF.
+ * Packs TRANS_CFG0/1 like ATF. last_sector_size uses U-Boot's
+ * available_spare = spare_size - ecc_size (capped by BCH metadata).
  *
  * @param params The Cadence NAND parameters structure.
  * @retval  0 on success or -ETIMEDOUT error value on failure.
@@ -358,9 +450,9 @@ static int cdns_nand_transfer_config(struct cadence_nand_params *params)
 	uint32_t sector_size = CNF_SECTOR_SIZE;
 	uint32_t last_sector_size = CNF_LAST_SECTOR_SIZE;
 	uint32_t skip_offset = CNF_SKIP_BYTES_OFFSET_VAL;
+	uint32_t avail_oob;
 	uint32_t trans_cfg0;
 	uint32_t trans_cfg1;
-	uint32_t oob_per_sector;
 	int ret;
 
 	ret = cdns_nand_wait_idle(base_address);
@@ -370,20 +462,18 @@ static int cdns_nand_transfer_config(struct cadence_nand_params *params)
 	}
 
 	/*
-	 * ATF uses fixed CNF_SECTOR_SIZE (0x800) and CNF_LAST_SECTOR_SIZE
-	 * (0x828). Derive the same fields from NAND geometry when possible:
-	 *   sector_cnt       = page_size / sector_size
-	 *   last_sector_size = sector_size + (spare_size / sector_cnt)
-	 * For page=8192, spare=160 → cnt=4, last=2048+40=0x828 (= ATF).
+	 * U-Boot TT_MAIN_OOB_AREAS:
+	 *   ecc_size         = sector_cnt * calc_ecc_bytes(max_step, strength)
+	 *   available_spare  = min(spare_size - ecc_size, bch_metadata_size)
+	 *   last_sector_size = sector_size + available_spare
 	 */
 	if ((params->page_size != 0U) &&
 	    ((params->page_size % CNF_SECTOR_SIZE) == 0U)) {
 		sector_size = CNF_SECTOR_SIZE;
 		sector_cnt = params->page_size / sector_size;
-		if ((sector_cnt != 0U) && (params->spare_size != 0U) &&
-		    ((params->spare_size % sector_cnt) == 0U)) {
-			oob_per_sector = params->spare_size / sector_cnt;
-			last_sector_size = sector_size + oob_per_sector;
+		avail_oob = cdns_nand_avail_spare(params, sector_cnt);
+		if (avail_oob != 0U) {
+			last_sector_size = sector_size + avail_oob;
 		}
 		skip_offset = params->page_size;
 	}
