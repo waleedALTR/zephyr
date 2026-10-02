@@ -4,3 +4,5 @@ board:
   vendor: intel
   socs:
     - name: agilex5
+      variants:
+        - name: nand
