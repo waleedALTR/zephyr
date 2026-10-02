@@ -10,6 +10,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/flash.h>
 #include <zephyr/kernel.h>
+#include <string.h>
 
 /* Check if reset property is defined */
 #define CDNS_NAND_RESET_SUPPORT DT_ANY_INST_HAS_PROP_STATUS_OKAY(resets)
@@ -22,8 +23,6 @@
 
 #define DEV_CFG(_dev)  ((const struct flash_cadence_nand_config *)(_dev)->config)
 #define DEV_DATA(_dev) ((struct flash_cadence_nand_data *const)(_dev)->data)
-
-#define FLASH_WRITE_SIZE DT_PROP(DT_INST(0, DT_DRV_COMPAT), block_size)
 
 #ifdef CONFIG_BOARD_INTEL_SOCFPGA_AGILEX5_SOCDK
 #define DFI_CFG_OFFSET 0xFC
@@ -38,6 +37,8 @@ struct flash_cadence_nand_data {
 	DEVICE_MMIO_NAMED_RAM(sdma);
 	/* device info structure */
 	struct cadence_nand_params params;
+	/* write_block_size is the NAND page size, read from the device at init */
+	struct flash_parameters parameters;
 	/* Mutex to prevent multiple processes from accessing the same driver api */
 	struct k_mutex nand_mutex;
 #if CONFIG_CDNS_NAND_INTERRUPT_SUPPORT
@@ -60,9 +61,6 @@ struct flash_cadence_nand_config {
 #endif
 };
 
-static const struct flash_parameters flash_cdns_parameters = {.write_block_size = FLASH_WRITE_SIZE,
-							      .erase_value = 0xFF};
-
 #if CONFIG_FLASH_PAGE_LAYOUT
 
 struct flash_pages_layout flash_cdns_pages_layout;
@@ -73,8 +71,9 @@ void flash_cdns_page_layout(const struct device *nand_dev, const struct flash_pa
 	struct flash_cadence_nand_data *const nand_data = DEV_DATA(nand_dev);
 	struct cadence_nand_params *nand_param = &nand_data->params;
 
-	flash_cdns_pages_layout.pages_count = nand_param->page_count;
-	flash_cdns_pages_layout.pages_size = nand_param->page_size;
+	/* Flash API "pages" are erase units, i.e. NAND blocks */
+	flash_cdns_pages_layout.pages_count = nand_param->nblocks_per_lun * nand_param->nluns;
+	flash_cdns_pages_layout.pages_size = nand_param->block_size;
 	*layout = &flash_cdns_pages_layout;
 	*layout_size = 1;
 }
@@ -139,9 +138,9 @@ static int flash_cdns_nand_read(const struct device *nand_dev, off_t offset, voi
 
 static const struct flash_parameters *flash_cdns_get_parameters(const struct device *nand_dev)
 {
-	ARG_UNUSED(nand_dev);
+	struct flash_cadence_nand_data *const nand_data = DEV_DATA(nand_dev);
 
-	return &flash_cdns_parameters;
+	return &nand_data->parameters;
 }
 static DEVICE_API(flash, flash_cdns_nand_api) = {
 	.erase = flash_cdns_nand_erase,
@@ -238,6 +237,13 @@ static int flash_cdns_nand_init(const struct device *nand_dev)
 	}
 	nand_param->page_count =
 		(nand_param->npages_per_block * nand_param->nblocks_per_lun * nand_param->nluns);
+
+	const struct flash_parameters parameters = {
+		.write_block_size = nand_param->page_size,
+		.erase_value = 0xFF,
+	};
+
+	memcpy(&nand_data->parameters, &parameters, sizeof(parameters));
 
 	LOG_INF("page_size %u spare_size %u page_count %lu"
 			" npages_per_block %u nblocks_per_lun %u nluns %u\n",

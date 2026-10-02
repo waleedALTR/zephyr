@@ -6,6 +6,8 @@
 
 #define DT_DRV_COMPAT zephyr_ftl_dhara
 
+#include <string.h>
+
 #include <dhara/map.h>
 #include <dhara/nand.h>
 #include <zephyr/drivers/disk.h>
@@ -25,8 +27,15 @@ struct disk_ftl_data {
 	const struct flash_area *area;
 	size_t page_size;
 	size_t block_size;
+	/* Disk sector size seen by a filesystem. Equal to page_size when that
+	 * already fits FAT (512..4096). Larger NAND pages are split.
+	 */
+	size_t sector_size;
+	uint32_t sectors_per_page;
 	size_t buffer_size;
 	uint8_t *page_buffer;
+	/* Full NAND page used to merge a logical sector into a Dhara page. */
+	uint8_t *rmw_buffer;
 	struct dhara_map dhara_map;
 	struct dhara_nand dhara_nand;
 	uint8_t *dhara_buffer;
@@ -212,6 +221,33 @@ static __maybe_unused int flash_area_is_uniform(const struct flash_area *fa)
 	return 0;
 }
 
+/* Largest disk sector FAT will accept. */
+#define DISK_FTL_FAT_SECTOR_MAX 4096U
+/* FAT's default sector size. Used when the NAND page is larger than FAT allows. */
+#define DISK_FTL_FAT_SECTOR_MIN 512U
+
+/* Return a sector size FAT can mount. Pages of 512..4096 stay unchanged so
+ * boards whose NAND page already fits are not affected. A larger page, such
+ * as this controller's 8192-byte page, is split into 512-byte sectors.
+ */
+static size_t disk_ftl_logical_sector_size(size_t page_size)
+{
+	if ((page_size >= DISK_FTL_FAT_SECTOR_MIN) && (page_size <= DISK_FTL_FAT_SECTOR_MAX)) {
+		return page_size;
+	}
+
+	if ((page_size > DISK_FTL_FAT_SECTOR_MAX) && ((page_size % DISK_FTL_FAT_SECTOR_MIN) == 0U)) {
+		return DISK_FTL_FAT_SECTOR_MIN;
+	}
+
+	return page_size;
+}
+
+static uint32_t disk_ftl_logical_sector_count(const struct disk_ftl_data *ctx)
+{
+	return dhara_map_capacity(&ctx->dhara_map) * ctx->sectors_per_page;
+}
+
 /* Everything necessary to acquire owning access to the disk. */
 static void acquire_disk(__maybe_unused struct disk_info *disk)
 {
@@ -289,6 +325,12 @@ int disk_ftl_access_init(struct disk_info *disk)
 	__ASSERT((ctx->block_size & (ctx->block_size - 1)) == 0,
 		 "erase block size is not a power of 2");
 
+	ctx->sector_size = disk_ftl_logical_sector_size(ctx->page_size);
+	ctx->sectors_per_page = ctx->page_size / ctx->sector_size;
+	__ASSERT(ctx->rmw_buffer != NULL, "missing page merge buffer");
+	LOG_INF("disk sector %zu bytes, %u per %zu-byte NAND page", ctx->sector_size,
+		ctx->sectors_per_page, ctx->page_size);
+
 	ctx->dhara_nand.log2_page_size = LOG2CEIL(ctx->page_size);
 	ctx->dhara_nand.log2_ppb = LOG2CEIL(ctx->block_size / ctx->page_size);
 	ctx->dhara_nand.num_blocks = ctx->area->fa_size / ctx->block_size;
@@ -343,7 +385,7 @@ static int disk_ftl_access_read(struct disk_info *disk, uint8_t *data_buf, uint3
 		return -EINVAL;
 	}
 
-	total_sectors = dhara_map_capacity(&ctx->dhara_map);
+	total_sectors = disk_ftl_logical_sector_count(ctx);
 
 	if ((total_sectors < num_sector) || (total_sectors - num_sector) < start_sector) {
 		release_disk(disk);
@@ -351,17 +393,46 @@ static int disk_ftl_access_read(struct disk_info *disk, uint8_t *data_buf, uint3
 		return -EINVAL;
 	}
 
-	for (uint32_t i = 0; i < num_sector; i++) {
-		uint32_t sector = start_sector + i;
+	/* One Dhara sector per call when the disk sector is already the NAND page. */
+	if (ctx->sectors_per_page == 1U) {
+		for (uint32_t i = 0; i < num_sector; i++) {
+			ret = dhara_map_read(&ctx->dhara_map, start_sector + i, buffer, &err);
+			if (ret != 0) {
+				release_disk(disk);
+				LOG_ERR("dhara_map_read failed with error %d", err);
+				return -EIO;
+			}
 
-		ret = dhara_map_read(&ctx->dhara_map, sector, buffer, &err);
+			buffer += ctx->page_size;
+		}
+
+		release_disk(disk);
+		return 0;
+	}
+
+	while (num_sector != 0U) {
+		uint32_t page = start_sector / ctx->sectors_per_page;
+		uint32_t slot = start_sector % ctx->sectors_per_page;
+		uint32_t count = ctx->sectors_per_page - slot;
+		size_t bytes;
+
+		if (count > num_sector) {
+			count = num_sector;
+		}
+
+		ret = dhara_map_read(&ctx->dhara_map, page, ctx->rmw_buffer, &err);
 		if (ret != 0) {
 			release_disk(disk);
 			LOG_ERR("dhara_map_read failed with error %d", err);
 			return -EIO;
 		}
 
-		buffer += ctx->page_size;
+		bytes = count * ctx->sector_size;
+		memcpy(buffer, ctx->rmw_buffer + (slot * ctx->sector_size), bytes);
+
+		buffer += bytes;
+		start_sector += count;
+		num_sector -= count;
 	}
 
 	release_disk(disk);
@@ -385,7 +456,7 @@ static int disk_ftl_access_write(struct disk_info *disk, const uint8_t *data_buf
 		return -EINVAL;
 	}
 
-	total_sectors = dhara_map_capacity(&ctx->dhara_map);
+	total_sectors = disk_ftl_logical_sector_count(ctx);
 
 	if ((total_sectors < num_sector) || (total_sectors - num_sector) < start_sector) {
 		release_disk(disk);
@@ -393,17 +464,57 @@ static int disk_ftl_access_write(struct disk_info *disk, const uint8_t *data_buf
 		return -EINVAL;
 	}
 
-	for (uint32_t i = 0; i < num_sector; i++) {
-		uint32_t sector = start_sector + i;
+	if (ctx->sectors_per_page == 1U) {
+		for (uint32_t i = 0; i < num_sector; i++) {
+			ret = dhara_map_write(&ctx->dhara_map, start_sector + i, buffer, &err);
+			if (ret != 0) {
+				release_disk(disk);
+				LOG_ERR("dhara_map_write failed with error %d", err);
+				return -EIO;
+			}
 
-		ret = dhara_map_write(&ctx->dhara_map, sector, buffer, &err);
+			buffer += ctx->page_size;
+		}
+
+		release_disk(disk);
+		return 0;
+	}
+
+	while (num_sector != 0U) {
+		uint32_t page = start_sector / ctx->sectors_per_page;
+		uint32_t slot = start_sector % ctx->sectors_per_page;
+		uint32_t count = ctx->sectors_per_page - slot;
+		size_t offset;
+		size_t bytes;
+
+		if (count > num_sector) {
+			count = num_sector;
+		}
+
+		/* Read the whole NAND page, replace the written slice, program it back.
+		 * An unmapped page comes back as 0xff, so the other sectors stay blank.
+		 */
+		ret = dhara_map_read(&ctx->dhara_map, page, ctx->rmw_buffer, &err);
+		if (ret != 0) {
+			release_disk(disk);
+			LOG_ERR("dhara_map_read failed with error %d", err);
+			return -EIO;
+		}
+
+		offset = slot * ctx->sector_size;
+		bytes = count * ctx->sector_size;
+		memcpy(ctx->rmw_buffer + offset, buffer, bytes);
+
+		ret = dhara_map_write(&ctx->dhara_map, page, ctx->rmw_buffer, &err);
 		if (ret != 0) {
 			release_disk(disk);
 			LOG_ERR("dhara_map_write failed with error %d", err);
 			return -EIO;
 		}
 
-		buffer += ctx->page_size;
+		buffer += bytes;
+		start_sector += count;
+		num_sector -= count;
 	}
 
 	release_disk(disk);
@@ -425,7 +536,7 @@ static int disk_ftl_access_erase(struct disk_info *disk, uint32_t start_sector, 
 		return -EINVAL;
 	}
 
-	total_sectors = dhara_map_capacity(&ctx->dhara_map);
+	total_sectors = disk_ftl_logical_sector_count(ctx);
 
 	if ((total_sectors < num_sector) || (total_sectors - num_sector) < start_sector) {
 		release_disk(disk);
@@ -433,15 +544,60 @@ static int disk_ftl_access_erase(struct disk_info *disk, uint32_t start_sector, 
 		return -EINVAL;
 	}
 
-	for (uint32_t i = 0; i < num_sector; i++) {
-		uint32_t sector = start_sector + i;
-
-		ret = dhara_map_trim(&ctx->dhara_map, sector, &err);
-		if (ret != 0) {
-			release_disk(disk);
-			LOG_ERR("dhara_map_trim failed with error %d", err);
-			return -EIO;
+	if (ctx->sectors_per_page == 1U) {
+		for (uint32_t i = 0; i < num_sector; i++) {
+			ret = dhara_map_trim(&ctx->dhara_map, start_sector + i, &err);
+			if (ret != 0) {
+				release_disk(disk);
+				LOG_ERR("dhara_map_trim failed with error %d", err);
+				return -EIO;
+			}
 		}
+
+		release_disk(disk);
+		return 0;
+	}
+
+	while (num_sector != 0U) {
+		uint32_t page = start_sector / ctx->sectors_per_page;
+		uint32_t slot = start_sector % ctx->sectors_per_page;
+		uint32_t count = ctx->sectors_per_page - slot;
+		size_t offset;
+		size_t bytes;
+
+		if (count > num_sector) {
+			count = num_sector;
+		}
+
+		if ((slot == 0U) && (count == ctx->sectors_per_page)) {
+			ret = dhara_map_trim(&ctx->dhara_map, page, &err);
+			if (ret != 0) {
+				release_disk(disk);
+				LOG_ERR("dhara_map_trim failed with error %d", err);
+				return -EIO;
+			}
+		} else {
+			ret = dhara_map_read(&ctx->dhara_map, page, ctx->rmw_buffer, &err);
+			if (ret != 0) {
+				release_disk(disk);
+				LOG_ERR("dhara_map_read failed with error %d", err);
+				return -EIO;
+			}
+
+			offset = slot * ctx->sector_size;
+			bytes = count * ctx->sector_size;
+			memset(ctx->rmw_buffer + offset, 0xff, bytes);
+
+			ret = dhara_map_write(&ctx->dhara_map, page, ctx->rmw_buffer, &err);
+			if (ret != 0) {
+				release_disk(disk);
+				LOG_ERR("dhara_map_write failed with error %d", err);
+				return -EIO;
+			}
+		}
+
+		start_sector += count;
+		num_sector -= count;
 	}
 
 	release_disk(disk);
@@ -463,7 +619,7 @@ static int disk_ftl_access_ioctl(struct disk_info *disk, uint8_t cmd, void *buff
 			return -EINVAL;
 		}
 
-		*(uint32_t *)buff = dhara_map_capacity(&ctx->dhara_map);
+		*(uint32_t *)buff = disk_ftl_logical_sector_count(ctx);
 		release_disk(disk);
 		break;
 
@@ -474,12 +630,12 @@ static int disk_ftl_access_ioctl(struct disk_info *disk, uint8_t cmd, void *buff
 			return -EINVAL;
 		}
 
-		*(uint32_t *)buff = ctx->page_size;
+		*(uint32_t *)buff = ctx->sector_size;
 		release_disk(disk);
 		break;
 
-	case DISK_IOCTL_GET_ERASE_BLOCK_SZ: /* in sectors */
-		*(uint32_t *)buff = 1;
+	case DISK_IOCTL_GET_ERASE_BLOCK_SZ: /* in logical sectors */
+		*(uint32_t *)buff = ctx->sectors_per_page != 0U ? ctx->sectors_per_page : 1U;
 		break;
 
 	case DISK_IOCTL_CTRL_SYNC:
@@ -552,6 +708,8 @@ static const struct disk_operations disk_ftl_ops = {
                                                                                                    \
 	static uint8_t disk_ftl_dhara_buffer_##n[DT_INST_PROP(n, buffer_size)];                    \
                                                                                                    \
+	static uint8_t disk_ftl_rmw_buffer_##n[DT_INST_PROP(n, buffer_size)];                      \
+                                                                                                   \
 	static struct disk_ftl_data disk_ftl_data_##n = {                                          \
 		.info =                                                                            \
 			{                                                                          \
@@ -561,6 +719,7 @@ static const struct disk_operations disk_ftl_ops = {
 		.area = FIXED_PARTITION_BY_NODE(PARTITION_PHANDLE(n)),                             \
 		.buffer_size = DT_INST_PROP(n, buffer_size),                                       \
 		.page_buffer = disk_ftl_page_buffer_##n,                                           \
+		.rmw_buffer = disk_ftl_rmw_buffer_##n,                                             \
 		.dhara_buffer = disk_ftl_dhara_buffer_##n,                                         \
 	};                                                                                         \
                                                                                                    \
