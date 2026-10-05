@@ -758,7 +758,7 @@ static int flash_shell_check_ddr_src(const struct shell *sh, uintptr_t addr, siz
 #endif
 	if (!ok) {
 		shell_error(sh,
-			    "DDR source [0x%lx + %zu) is outside mapped load regions",
+			    "DDR range [0x%lx + %zu) is outside mapped load regions",
 			    (unsigned long)addr, len);
 #if DT_NODE_EXISTS(DT_NODELABEL(fpga_config))
 		shell_error(sh, "  fpga_config [0x%lx .. 0x%lx)",
@@ -777,14 +777,66 @@ static int flash_shell_check_ddr_src(const struct shell *sh, uintptr_t addr, siz
 	return 0;
 #else
 	if (addr == 0U || len == 0U) {
-		shell_error(sh, "Invalid DDR source 0x%lx len %zu",
+		shell_error(sh, "Invalid DDR address 0x%lx len %zu",
 			    (unsigned long)addr, len);
 		return -EINVAL;
 	}
-	shell_warn(sh, "DDR source 0x%lx is not DT-checked (no fpga_config/low_ddr)",
+	shell_warn(sh, "DDR address 0x%lx is not DT-checked (no fpga_config/low_ddr)",
 		   (unsigned long)addr);
 	return 0;
 #endif
+}
+
+static int cmd_mem_read(const struct shell *sh, size_t argc, char *argv[])
+{
+	const struct device *flash_dev;
+	uint32_t flash_off;
+	unsigned long long ddr_addr;
+	unsigned long size;
+	uint8_t *dst;
+	int ret;
+	int err = 0;
+
+	ret = parse_helper(sh, &argc, &argv, &flash_dev, &flash_off);
+	if (ret) {
+		return ret;
+	}
+	if (argc < 4) {
+		shell_error(sh,
+			    "Usage: flash mem_read [<device>] <flash_offset> <ddr_addr> <size>");
+		return -EINVAL;
+	}
+
+	ddr_addr = shell_strtoull(argv[2], 0, &err);
+	if (err != 0) {
+		shell_error(sh, "Invalid DDR address: %s", argv[2]);
+		return -EINVAL;
+	}
+	err = 0;
+	size = shell_strtoul(argv[3], 0, &err);
+	if (err != 0 || size == 0U) {
+		shell_error(sh, "Invalid size: %s", argv[3]);
+		return -EINVAL;
+	}
+
+	dst = (uint8_t *)(uintptr_t)ddr_addr;
+
+	ret = flash_shell_check_ddr_src(sh, (uintptr_t)dst, size);
+	if (ret < 0) {
+		return ret;
+	}
+
+	shell_print(sh, "Reading %lu bytes from flash 0x%x to DDR 0x%lx",
+		    size, flash_off, (unsigned long)(uintptr_t)dst);
+	ret = flash_read(flash_dev, flash_off, dst, size);
+	if (ret != 0) {
+		shell_error(sh, "Read failed, code %d", ret);
+		return ret;
+	}
+
+	shell_print(sh, "Read %lu bytes to DDR 0x%lx", size,
+		    (unsigned long)(uintptr_t)dst);
+	return 0;
 }
 
 static int cmd_mem_write(const struct shell *sh, size_t argc, char *argv[])
@@ -936,6 +988,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(flash_cmds,
 	SHELL_CMD_ARG(mem_write, &dsub_device_name,
 		"[<device>] <flash_offset> <ddr_addr> <size>",
 		cmd_mem_write, 4, 1),
+	SHELL_CMD_ARG(mem_read, &dsub_device_name,
+		"[<device>] <flash_offset> <ddr_addr> <size>",
+		cmd_mem_read, 4, 1),
 	SHELL_CMD_ARG(page_info, &dsub_device_name,
 		"[<device>] <address>",
 		cmd_page_info, 2, 1),

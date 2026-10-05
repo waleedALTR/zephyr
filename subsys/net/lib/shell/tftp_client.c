@@ -10,6 +10,8 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(net_shell);
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -127,13 +129,14 @@ static struct tftp_ddr_shell_ctx *tftp_ddr_active_ctx;
 
 /*
  * HPS low DDR window used for -a validation (Agilex5 only).
- * Restricted sub-ranges (boot / Zephyr / TF-A mailbox) are denied below.
+ * Restricted sub-ranges (boot / Zephyr / mailbox / fpga_config) are denied below.
  */
 #define TFTP_SHELL_DDR_LOW_BASE  ((uintptr_t)0x80000000ULL)
 #define TFTP_SHELL_DDR_LOW_END   ((uintptr_t)0x100000000ULL)
 
-#define TFTP_SHELL_MEM0_NODE     DT_NODELABEL(mem0)
-#define TFTP_SHELL_MBOX_NODE     DT_NODELABEL(mbox_ddr)
+#define TFTP_SHELL_MEM0_NODE         DT_NODELABEL(mem0)
+#define TFTP_SHELL_MBOX_NODE         DT_NODELABEL(mbox_ddr)
+#define TFTP_SHELL_FPGA_CONFIG_NODE  DT_NODELABEL(fpga_config)
 
 struct tftp_shell_deny_range {
 	uintptr_t base;
@@ -154,6 +157,7 @@ static bool tftp_shell_ranges_overlap(uintptr_t a, size_t a_len, uintptr_t b, si
  *  - FSBL/BL staging below Zephyr RAM
  *  - Zephyr SRAM (mem0)
  *  - TF-A SiP mailbox (mbox_ddr)
+ *  - fpga_config buffer
  */
 static int tftp_shell_validate_ddr_dest(const struct shell *sh, uintptr_t addr,
 					size_t *max_inout)
@@ -161,7 +165,7 @@ static int tftp_shell_validate_ddr_dest(const struct shell *sh, uintptr_t addr,
 	size_t max_len = *max_inout;
 	size_t room;
 	size_t i;
-	struct tftp_shell_deny_range deny[3];
+	struct tftp_shell_deny_range deny[4];
 	size_t deny_cnt = 0;
 
 	if (addr < TFTP_SHELL_DDR_LOW_BASE || addr >= TFTP_SHELL_DDR_LOW_END) {
@@ -196,6 +200,12 @@ static int tftp_shell_validate_ddr_dest(const struct shell *sh, uintptr_t addr,
 	deny[deny_cnt].base = (uintptr_t)DT_REG_ADDR(TFTP_SHELL_MBOX_NODE);
 	deny[deny_cnt].size = (size_t)DT_REG_SIZE(TFTP_SHELL_MBOX_NODE);
 	deny[deny_cnt].name = "TF-A mailbox (mbox_ddr)";
+	deny_cnt++;
+#endif
+#if DT_NODE_EXISTS(TFTP_SHELL_FPGA_CONFIG_NODE)
+	deny[deny_cnt].base = (uintptr_t)DT_REG_ADDR(TFTP_SHELL_FPGA_CONFIG_NODE);
+	deny[deny_cnt].size = (size_t)DT_REG_SIZE(TFTP_SHELL_FPGA_CONFIG_NODE);
+	deny[deny_cnt].name = "fpga_config";
 	deny_cnt++;
 #endif
 
@@ -281,13 +291,15 @@ static void tftp_ddr_event_cb(const struct tftp_evt *evt)
 }
 
 static int tftp_ddr_args_to_params(const struct shell *sh, struct tftp_ddr_shell_ctx *ctx,
-				   size_t argc, char *argv[])
+				   size_t argc, char *argv[], bool size_required)
 {
 	struct getopt_state *state;
 	int opt_index = 0;
 	int opt;
 	int err = 0;
 	int ret;
+	bool size_set = false;
+	size_t requested_size = 0;
 
 	static const struct option long_opts[] = {
 		{"server", required_argument, 0, 's'},
@@ -301,7 +313,8 @@ static int tftp_ddr_args_to_params(const struct shell *sh, struct tftp_ddr_shell
 	ctx->client.callback = tftp_ddr_event_cb;
 	ctx->mode = "octet";
 	ctx->ddr_base = NULL;
-	ctx->ddr_max = TFTP_SHELL_DDR_DEFAULT_MAX;
+	/* get_ddr: optional -z with 16 MiB default; put_ddr: -z required, no default. */
+	ctx->ddr_max = size_required ? 0U : TFTP_SHELL_DDR_DEFAULT_MAX;
 
 	while ((opt = getopt_long(argc, argv, "s:f:m:a:z:", long_opts, &opt_index)) != -1) {
 		state = getopt_state_get();
@@ -340,7 +353,12 @@ static int tftp_ddr_args_to_params(const struct shell *sh, struct tftp_ddr_shell
 				PR_ERROR("Invalid max size: %s\n", state->optarg);
 				return -EINVAL;
 			}
+			if (sz > UINT32_MAX) {
+				PR_ERROR("Size exceeds uint32_t max: %s\n", state->optarg);
+				return -EINVAL;
+			}
 			ctx->ddr_max = (size_t)sz;
+			size_set = true;
 			break;
 		}
 		case '?':
@@ -359,16 +377,31 @@ static int tftp_ddr_args_to_params(const struct shell *sh, struct tftp_ddr_shell
 		return -EINVAL;
 	}
 
+	if (size_required && !size_set) {
+		PR_ERROR("Size required (-z)\n");
+		return -EINVAL;
+	}
+
+	requested_size = ctx->ddr_max;
+
 #if defined(CONFIG_SOC_AGILEX5)
-	/* Restricted-region check is Agilex5-only (mem0 / mbox / FSBL map). */
+	/* Restricted-region check is Agilex5-only (FSBL/mem0/mbox/fpga_config). */
 	ret = tftp_shell_validate_ddr_dest(sh, (uintptr_t)ctx->ddr_base, &ctx->ddr_max);
 	if (ret < 0) {
 		ctx->ddr_base = NULL;
 		return ret;
 	}
+	/* put_ddr: do not silently shorten the upload if the range was clamped. */
+	if (size_required && ctx->ddr_max < requested_size) {
+		PR_ERROR("Size %zu exceeds writable DDR room %zu at 0x%lx\n", requested_size,
+			 ctx->ddr_max, (unsigned long)(uintptr_t)ctx->ddr_base);
+		ctx->ddr_base = NULL;
+		return -EINVAL;
+	}
 #else
 	ARG_UNUSED(sh);
 	ARG_UNUSED(ret);
+	ARG_UNUSED(requested_size);
 #endif
 
 	return 0;
@@ -438,7 +471,7 @@ static int cmd_tftp_get_ddr(const struct shell *sh, size_t argc, char *argv[])
 	int ret;
 
 	tftp_shell = sh;
-	ret = tftp_ddr_args_to_params(sh, &ctx, argc, argv);
+	ret = tftp_ddr_args_to_params(sh, &ctx, argc, argv, false);
 	if (ret < 0) {
 		return ret;
 	}
@@ -470,6 +503,38 @@ static int cmd_tftp_get_ddr(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static int cmd_tftp_put_ddr(const struct shell *sh, size_t argc, char *argv[])
+{
+#if defined(CONFIG_TFTP_LIB)
+	struct tftp_ddr_shell_ctx ctx;
+	int ret;
+
+	tftp_shell = sh;
+	ret = tftp_ddr_args_to_params(sh, &ctx, argc, argv, true);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (ctx.file_name == NULL) {
+		PR_ERROR("Invalid argument(s)\n");
+		return -EINVAL;
+	}
+
+	ret = tftp_put(&ctx.client, ctx.file_name, ctx.mode, ctx.ddr_base,
+		       (uint32_t)ctx.ddr_max);
+	if (ret < 0) {
+		PR_ERROR("Error while putting file (%d)\n", ret);
+		return ret;
+	}
+
+	PR_INFO("Sent %d bytes from DDR 0x%016lx\n", ret,
+		(unsigned long)(uintptr_t)ctx.ddr_base);
+#else
+	PR_INFO("Set %s to enable %s support.\n", "CONFIG_TFTP_LIB", "TFTP client");
+#endif
+	return 0;
+}
+
 /* Use plain help strings (same style as other net shell cmds on this tree). */
 SHELL_STATIC_SUBCMD_SET_CREATE(tftp_cmds,
 	SHELL_CMD_ARG(get, NULL,
@@ -481,8 +546,13 @@ SHELL_STATIC_SUBCMD_SET_CREATE(tftp_cmds,
 	SHELL_CMD_ARG(get_ddr, NULL,
 		      "net tftp get_ddr -s <addr>[:port] -f <file> -a <ddr> "
 		      "[-z <max>] [-m <mode>] "
-		      "(Agilex5: rejects FSBL/mem0/mbox DDR)",
+		      "(Agilex5: rejects FSBL/mem0/mbox/fpga_config DDR)",
 		      cmd_tftp_get_ddr, 7, 4),
+	SHELL_CMD_ARG(put_ddr, NULL,
+		      "net tftp put_ddr -s <addr>[:port] -f <file> -a <ddr> -z <size> "
+		      "[-m <mode>] "
+		      "(Agilex5: rejects FSBL/mem0/mbox/fpga_config DDR)",
+		      cmd_tftp_put_ddr, 9, 2),
 	SHELL_SUBCMD_SET_END
 );
 
