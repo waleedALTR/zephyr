@@ -94,3 +94,21 @@
 		status = "okay";
 	};
 };
+
+&nand {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		nand_fip_partition: partition@0 {
+			label = "fip";
+			reg = <0x00200000 DT_SIZE_M(10)>;
+		};
+
+		nand_storage_partition: partition@a00000 {
+			label = "storage";
+			reg = <0x00a00000 0xff600000>;
+		};
+	};
+};
