@@ -109,6 +109,21 @@
 		zephyr,memory-region = "MBOX_DDR";
 	};
 
+	/*
+	 * fpga_config: general-purpose DDR buffer (4 MiB).
+	 * HPS low DDR is 2 GiB @ 0x80000000 .. 0xffffffff (end excl. 0x100000000).
+	 */
+	fpga_config: memory@83000000 {
+		compatible = "mmio-sram";
+		reg = <0x83000000 DT_SIZE_M(4)>; /* 0x83000000 .. 0x83400000 */
+	};
+
+	/* Remainder of HPS low DDR after fpga_config through end of 2 GiB window. */
+	low_ddr: memory@83400000 {
+		compatible = "mmio-sram";
+		reg = <0x83400000 0x7cc00000>; /* 0x83400000 .. 0x100000000 */
+	};
+
 	/* This qspi setting included
 	 * The QSPI controller register and
 	 * The QSPI data register

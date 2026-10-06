@@ -103,7 +103,7 @@
 
 		nand_fip_partition: partition@0 {
 			label = "fip";
-			reg = <0x00200000 DT_SIZE_M(10)>;
+			reg = <0x0 DT_SIZE_M(10)>;
 		};
 
 		nand_storage_partition: partition@a00000 {
