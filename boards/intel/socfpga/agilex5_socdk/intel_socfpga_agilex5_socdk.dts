@@ -112,3 +112,12 @@
 		};
 	};
 };
+
+/ {
+	ftl {
+		compatible = "zephyr,ftl-dhara";
+		partition = <&nand_storage_partition>;
+		disk-name = "NAND";
+		buffer-size = <8192>;
+	};
+};
