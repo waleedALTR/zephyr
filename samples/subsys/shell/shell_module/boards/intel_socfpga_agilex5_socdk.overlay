@@ -10,6 +10,11 @@
 	};
 };
 
+/*
+ * Agilex 5 combo PHY is muxed to either NAND or SDMMC.
+ * Enable only one controller. NAND daughter card: PHY selected
+ * for NAND (okay here); leave &sdmmc/mmc disabled.
+ */
 &nand {
 	status = "okay";
 };
@@ -57,14 +62,18 @@
 	status = "okay";
 };
 
+/*
+ * Disabled the sdmmc node when combo_phy is selected for the
+ * nand controller.
+ */
 &sdmmc {
-	status = "okay";
+	status = "disabled";
 
 	mmc {
 		/*SD Disk Access */
 		compatible = "zephyr,sdmmc-disk";
 		disk-name = "SD";
-		status = "okay";
+		status = "disabled";
 	};
 };
 

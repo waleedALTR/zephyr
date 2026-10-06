@@ -15,6 +15,40 @@ config SHELL_DYNAMIC_CMDS
 	bool "Shell dynamic commands example"
 	default y
 
+choice SHELL_MODULE_STORAGE
+	prompt "Storage backend"
+	default SHELL_MODULE_STORAGE_NAND if DT_HAS_CDNS_NAND_ENABLED
+	default SHELL_MODULE_STORAGE_SDMMC
+	help
+	  Select the disk backend. FAT is enabled from the board .conf.
+	  NAND is the default when Cadence NAND is status okay in DT.
+	  For SDMMC, also set &sdmmc / mmc status = "okay" in the overlay.
+
+config SHELL_MODULE_STORAGE_NAND
+	bool "NAND flash"
+	select FLASH_MAP
+	help
+	  Use Cadence NAND (and Dhara when present). Does not enable SDMMC.
+
+config SHELL_MODULE_STORAGE_SDMMC
+	bool "SDMMC"
+	select SDHC
+	help
+	  Use the SDMMC disk. Requires &sdmmc and zephyr,sdmmc-disk okay
+	  so CONFIG_DISK_DRIVER_SDMMC can default on.
+
+endchoice
+
 endmenu
+
+if SHELL_MODULE_STORAGE_NAND
+config FS_FATFS_CUSTOM_MOUNT_POINT_COUNT
+	int
+	default 1
+
+config FS_FATFS_CUSTOM_MOUNT_POINTS
+	string
+	default "NAND"
+endif
 
 source "Kconfig.zephyr"
