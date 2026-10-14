@@ -3,9 +3,33 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+
+#include <string.h>
+#include <zephyr/cache.h>
+#include <zephyr/kernel/mm.h>
+#include <zephyr/sys/util.h>
 #include "flash_cadence_nand_ll.h"
 
 LOG_MODULE_REGISTER(flash_cdns_nand_ll, CONFIG_FLASH_LOG_LEVEL);
+
+static inline void cdns_nand_dump_regs(mem_addr_t base_address)
+{
+	uint32_t i, v1, v2, v3, v4;
+	mem_addr_t va = base_address;
+	uint32_t pa = 0x10b80000;
+
+	for (i = 0; i < 540; i++) {
+		v1 = sys_read32(va + 0x0);
+		v2 = sys_read32(va + 0x4);
+		v3 = sys_read32(va + 0x8);
+		v4 = sys_read32(va + 0xc);
+		if (v1 || v2 || v3 || v4) {
+			printk("%08x: %08x %08x %08x %08x\n", pa, v1, v2, v3, v4);
+		}
+		va += 16;
+		pa += 16;
+	}
+}
 
 /**
  * Wait for the Cadence NAND controller to become idle.
@@ -97,7 +121,7 @@ static int cdns_nand_device_info(struct cadence_nand_params *params)
 	params->block_size = (params->npages_per_block * params->page_size);
 	params->device_size = ((long long)params->block_size *
 			       (long long)(params->nblocks_per_lun * params->nluns));
-	LOG_INF("block size %x total device size %llx", params->block_size, params->device_size);
+	LOG_INF("block size %uK total device size %lluM", params->block_size >> 10, params->device_size >> 20);
 
 	/* Calculate bit size of page, block and lun*/
 	params->page_size_bit = find_msb_set((params->npages_per_block) - 1);
@@ -106,6 +130,7 @@ static int cdns_nand_device_info(struct cadence_nand_params *params)
 	return 0;
 }
 
+#if 0
 /**
  * Retrieve the status of a specific thread in the Cadence NAND controller.
  *
@@ -121,6 +146,7 @@ static uint32_t cdns_nand_get_thrd_status(uintptr_t base_address, uint8_t thread
 	status = sys_read32((base_address + CMD_STAT_CMD_STATUS));
 	return status;
 }
+#endif
 
 /**
  * Wait for a specific thread in the Cadence controller to complete.
@@ -141,6 +167,7 @@ static int cdns_wait_for_thread(uintptr_t base_address, uint8_t thread)
 	return 0;
 }
 
+#if 0
 /**
  * Set features in the Cadence NAND controller using PIO operations.
  *
@@ -204,104 +231,459 @@ static int cdns_pio_transfer_complete(uintptr_t base_address, uint8_t thread)
 	}
 	return 0;
 }
+#endif
+
+/*
+ * ONFI SDR timing modes 0–5 (picoseconds). Fields used by
+ * cadence_setup_data_interface only; from U-Boot nand_timings.c.
+ */
+struct cdns_nand_sdr_timings {
+	uint32_t tCCS_min;
+	uint32_t tADL_min;
+	uint32_t tALS_min;
+	uint32_t tCEH_min;
+	uint32_t tCS_min;
+	uint32_t tFEAT_max;
+	uint32_t tRC_min;
+	uint32_t tREA_max;
+	uint32_t tREH_min;
+	uint32_t tRHOH_min;
+	uint32_t tRHW_min;
+	uint32_t tRHZ_max;
+	uint32_t tRP_min;
+	uint32_t tWB_max;
+	uint32_t tWC_min;
+	uint32_t tWH_min;
+	uint32_t tWHR_min;
+	uint32_t tWP_min;
+};
+
+static const struct cdns_nand_sdr_timings onfi_sdr_timings[] = {
+	{ /* mode 0 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 50000,
+		.tCEH_min = 20000, .tCS_min = 70000, .tFEAT_max = 1000000,
+		.tRC_min = 100000, .tREA_max = 40000, .tREH_min = 30000,
+		.tRHOH_min = 0, .tRHW_min = 200000, .tRHZ_max = 200000,
+		.tRP_min = 50000, .tWB_max = 200000, .tWC_min = 100000,
+		.tWH_min = 30000, .tWHR_min = 120000, .tWP_min = 50000,
+	},
+	{ /* mode 1 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 25000,
+		.tCEH_min = 20000, .tCS_min = 35000, .tFEAT_max = 1000000,
+		.tRC_min = 50000, .tREA_max = 30000, .tREH_min = 15000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 25000, .tWB_max = 100000, .tWC_min = 45000,
+		.tWH_min = 15000, .tWHR_min = 80000, .tWP_min = 25000,
+	},
+	{ /* mode 2 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 15000,
+		.tCEH_min = 20000, .tCS_min = 25000, .tFEAT_max = 1000000,
+		.tRC_min = 35000, .tREA_max = 25000, .tREH_min = 15000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 17000, .tWB_max = 100000, .tWC_min = 35000,
+		.tWH_min = 15000, .tWHR_min = 80000, .tWP_min = 17000,
+	},
+	{ /* mode 3 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 10000,
+		.tCEH_min = 20000, .tCS_min = 25000, .tFEAT_max = 1000000,
+		.tRC_min = 30000, .tREA_max = 20000, .tREH_min = 10000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 15000, .tWB_max = 100000, .tWC_min = 30000,
+		.tWH_min = 10000, .tWHR_min = 80000, .tWP_min = 15000,
+	},
+	{ /* mode 4 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 10000,
+		.tCEH_min = 20000, .tCS_min = 20000, .tFEAT_max = 1000000,
+		.tRC_min = 25000, .tREA_max = 20000, .tREH_min = 10000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 12000, .tWB_max = 100000, .tWC_min = 25000,
+		.tWH_min = 10000, .tWHR_min = 80000, .tWP_min = 12000,
+	},
+	{ /* mode 5 */
+		.tCCS_min = 500000, .tADL_min = 400000, .tALS_min = 10000,
+		.tCEH_min = 20000, .tCS_min = 15000, .tFEAT_max = 1000000,
+		.tRC_min = 20000, .tREA_max = 16000, .tREH_min = 7000,
+		.tRHOH_min = 15000, .tRHW_min = 100000, .tRHZ_max = 100000,
+		.tRP_min = 10000, .tWB_max = 100000, .tWC_min = 20000,
+		.tWH_min = 7000, .tWHR_min = 80000, .tWP_min = 10000,
+	},
+};
+
+struct cadence_nand_timings {
+	uint32_t async_toggle_timings;
+	uint32_t timings0;
+	uint32_t timings1;
+	uint32_t timings2;
+	uint32_t dll_phy_ctrl;
+	uint32_t phy_ctrl;
+	uint32_t phy_dqs_timing;
+	uint32_t phy_gate_lpbk_ctrl;
+};
+
+static int calc_cycl(uint32_t timing, uint32_t clock)
+{
+	if ((timing == 0U) || (clock == 0U)) {
+		return 0;
+	}
+
+	if ((timing % clock) > 0U) {
+		return (int)(timing / clock);
+	}
+
+	return (int)(timing / clock) - 1;
+}
+
+static inline uint32_t calc_tdvw_max(uint32_t trp_cnt, uint32_t clk_period,
+				     uint32_t trhoh_min, uint32_t board_delay_skew_min,
+				     uint32_t ext_mode)
+{
+	if (ext_mode == 0U) {
+		clk_period /= 2U;
+	}
+
+	return (trp_cnt + 1U) * clk_period + trhoh_min + board_delay_skew_min;
+}
+
+static inline uint32_t calc_tdvw(uint32_t trp_cnt, uint32_t clk_period,
+				 uint32_t trhoh_min, uint32_t trea_max, uint32_t ext_mode)
+{
+	if (ext_mode == 0U) {
+		clk_period /= 2U;
+	}
+
+	return (trp_cnt + 1U) * clk_period + trhoh_min - trea_max;
+}
+
+static inline bool cdns_field_fit(uint32_t mask, uint32_t val)
+{
+	uint32_t max = mask >> __builtin_ctz(mask);
+
+	return val <= max;
+}
+
+/**
+ * Port of U-Boot cadence_setup_data_interface() for ONFI SDR timing @mode.
+ */
+static int cdns_nand_setup_data_interface(struct cadence_nand_params *params,
+					  int mode, bool is_phy_type_dll,
+					  struct cadence_nand_timings *t)
+{
+	const struct cdns_nand_sdr_timings *sdr;
+	uint32_t board_delay = params->board_delay_ps;
+	uint32_t nf_clk = params->nf_clk_rate;
+	uint32_t clk_period;
+	uint32_t if_skew = 0U;
+	uint32_t board_delay_skew_min;
+	uint32_t board_delay_skew_max;
+	uint32_t tceh_cnt, tcs_cnt, tadl_cnt, tccs_cnt;
+	uint32_t tfeat_cnt, trhz_cnt, tvdly_cnt;
+	uint32_t trhw_cnt, twb_cnt, twh_cnt = 0U, twhr_cnt;
+	uint32_t twp_cnt = 0U, trp_cnt = 0U, trh_cnt = 0U;
+	uint32_t dqs_sampl_res, phony_dqs_mod;
+	uint32_t tdvw, tdvw_min, tdvw_max;
+	uint32_t ext_rd_mode, ext_wr_mode;
+	uint32_t dll_phy_dqs_timing = 0U, phony_dqs_timing = 0U, rd_del_sel = 0U;
+	uint32_t sampling_point;
+	uint32_t reg;
+
+	if ((mode < 0) || (mode >= (int)ARRAY_SIZE(onfi_sdr_timings))) {
+		return -EINVAL;
+	}
+
+	if (nf_clk == 0U) {
+		nf_clk = CNF_DEFAULT_NF_CLK_RATE_HZ;
+	}
+	if (board_delay == 0U) {
+		board_delay = CNF_DEFAULT_BOARD_DELAY_PS;
+	}
+
+	sdr = &onfi_sdr_timings[mode];
+	clk_period = (uint32_t)(1000000000000ULL / nf_clk);
+	board_delay_skew_min = board_delay - if_skew;
+	board_delay_skew_max = board_delay + if_skew;
+
+	(void)memset(t, 0, sizeof(*t));
+
+	phony_dqs_mod = is_phy_type_dll ? 2U : 1U;
+	dqs_sampl_res = clk_period / phony_dqs_mod;
+	tdvw_min = sdr->tREA_max + board_delay_skew_max;
+
+	if ((sdr->tRC_min <= clk_period) &&
+	    (sdr->tRP_min <= (clk_period / 2U)) &&
+	    (sdr->tREH_min <= (clk_period / 2U))) {
+		ext_rd_mode = 0U;
+		tdvw = calc_tdvw(trp_cnt, clk_period, sdr->tRHOH_min,
+				 sdr->tREA_max, ext_rd_mode);
+		tdvw_max = calc_tdvw_max(trp_cnt, clk_period, sdr->tRHOH_min,
+					 board_delay_skew_min, ext_rd_mode);
+		if (tdvw > 0U) {
+			if ((tdvw_max <= tdvw_min) || ((tdvw_max % dqs_sampl_res) == 0U)) {
+				ext_rd_mode = 1U;
+			}
+		} else {
+			trp_cnt = (sdr->tREA_max + board_delay_skew_max + dqs_sampl_res) /
+				  clk_period;
+			ext_rd_mode = 1U;
+		}
+	} else {
+		uint32_t trh;
+
+		ext_rd_mode = 1U;
+		trp_cnt = (uint32_t)calc_cycl(sdr->tRP_min, clk_period);
+		trh = sdr->tRC_min - ((trp_cnt + 1U) * clk_period);
+		if (sdr->tREH_min >= trh) {
+			trh_cnt = (uint32_t)calc_cycl(sdr->tREH_min, clk_period);
+		} else {
+			trh_cnt = (uint32_t)calc_cycl(trh, clk_period);
+		}
+
+		tdvw = calc_tdvw(trp_cnt, clk_period, sdr->tRHOH_min,
+				 sdr->tREA_max, ext_rd_mode);
+		if (tdvw > 0U) {
+			tdvw_max = calc_tdvw_max(trp_cnt, clk_period, sdr->tRHOH_min,
+						 board_delay_skew_min, ext_rd_mode);
+			if ((((tdvw_max / dqs_sampl_res) * dqs_sampl_res) <= tdvw_min) ||
+			    (((tdvw_max % dqs_sampl_res) == 0U) &&
+			     ((((tdvw_max / dqs_sampl_res) - 1U) * dqs_sampl_res) <= tdvw_min))) {
+				trp_cnt = trp_cnt + 1U;
+			}
+		} else {
+			trp_cnt = (sdr->tREA_max + board_delay_skew_max + dqs_sampl_res) /
+				  clk_period;
+		}
+	}
+
+	tdvw_max = calc_tdvw_max(trp_cnt, clk_period, sdr->tRHOH_min,
+				 board_delay_skew_min, ext_rd_mode);
+
+	if ((sdr->tWC_min <= clk_period) &&
+	    ((sdr->tWP_min + if_skew) <= (clk_period / 2U)) &&
+	    ((sdr->tWH_min + if_skew) <= (clk_period / 2U))) {
+		ext_wr_mode = 0U;
+	} else {
+		uint32_t twh;
+
+		ext_wr_mode = 1U;
+		twp_cnt = (uint32_t)calc_cycl(sdr->tWP_min + if_skew, clk_period);
+		if (((twp_cnt + 1U) * clk_period) < (sdr->tALS_min + if_skew)) {
+			twp_cnt = (uint32_t)calc_cycl(sdr->tALS_min + if_skew, clk_period);
+		}
+
+		twh = sdr->tWC_min - (twp_cnt + 1U) * clk_period;
+		if (sdr->tWH_min >= twh) {
+			twh = sdr->tWH_min;
+		}
+		twh_cnt = (uint32_t)calc_cycl(twh + if_skew, clk_period);
+	}
+
+	reg = FIELD_PREP(CNF_ASYNC_TOGGLE_TRH, trh_cnt) |
+	      FIELD_PREP(CNF_ASYNC_TOGGLE_TRP, trp_cnt) |
+	      FIELD_PREP(CNF_ASYNC_TOGGLE_TWH, twh_cnt) |
+	      FIELD_PREP(CNF_ASYNC_TOGGLE_TWP, twp_cnt);
+	t->async_toggle_timings = reg;
+
+	tadl_cnt = (uint32_t)calc_cycl(sdr->tADL_min + if_skew, clk_period);
+	tccs_cnt = (uint32_t)calc_cycl(sdr->tCCS_min + if_skew, clk_period);
+	twhr_cnt = (uint32_t)calc_cycl(sdr->tWHR_min + if_skew, clk_period);
+	trhw_cnt = (uint32_t)calc_cycl(sdr->tRHW_min + if_skew, clk_period);
+	reg = FIELD_PREP(CNF_TIMINGS0_TADL, tadl_cnt);
+	if (cdns_field_fit(CNF_TIMINGS0_TCCS, tccs_cnt)) {
+		reg |= FIELD_PREP(CNF_TIMINGS0_TCCS, tccs_cnt);
+	} else {
+		reg |= CNF_TIMINGS0_TCCS;
+	}
+	reg |= FIELD_PREP(CNF_TIMINGS0_TWHR, twhr_cnt) |
+	       FIELD_PREP(CNF_TIMINGS0_TRHW, trhw_cnt);
+	t->timings0 = reg;
+
+	trhz_cnt = (uint32_t)calc_cycl(sdr->tRHZ_max, clk_period) + 1U;
+	twb_cnt = (uint32_t)calc_cycl(sdr->tWB_max + board_delay, clk_period) + 3U + 5U;
+	tvdly_cnt = (uint32_t)calc_cycl(500000U + if_skew, clk_period);
+	t->timings1 = FIELD_PREP(CNF_TIMINGS1_TRHZ, trhz_cnt) |
+		      FIELD_PREP(CNF_TIMINGS1_TWB, twb_cnt) |
+		      FIELD_PREP(CNF_TIMINGS1_TVDLY, tvdly_cnt);
+
+	tfeat_cnt = (uint32_t)calc_cycl(sdr->tFEAT_max, clk_period);
+	if (tfeat_cnt < twb_cnt) {
+		tfeat_cnt = twb_cnt;
+	}
+	tceh_cnt = (uint32_t)calc_cycl(sdr->tCEH_min, clk_period);
+	tcs_cnt = (uint32_t)calc_cycl(sdr->tCS_min + if_skew, clk_period);
+	t->timings2 = FIELD_PREP(CNF_TIMINGS2_TFEAT, tfeat_cnt) |
+		      FIELD_PREP(CNF_TIMINGS2_CS_HOLD, tceh_cnt) |
+		      FIELD_PREP(CNF_TIMINGS2_CS_SETUP, tcs_cnt);
+
+	if (is_phy_type_dll) {
+		reg = CNF_DLL_PHY_CTRL_DLL_RST_N;
+		if (ext_wr_mode != 0U) {
+			reg |= CNF_DLL_PHY_CTRL_EXT_WR;
+		}
+		if (ext_rd_mode != 0U) {
+			reg |= CNF_DLL_PHY_CTRL_EXT_RD;
+		}
+		reg |= FIELD_PREP(CNF_DLL_PHY_CTRL_RS_HIGH_WAIT, 7U) |
+		       FIELD_PREP(CNF_DLL_PHY_CTRL_RS_IDLE, 7U);
+		t->dll_phy_ctrl = reg;
+	}
+
+	if ((tdvw_max % dqs_sampl_res) > 0U) {
+		sampling_point = tdvw_max / dqs_sampl_res;
+	} else {
+		sampling_point = (tdvw_max / dqs_sampl_res) - 1U;
+	}
+
+	if ((sampling_point * dqs_sampl_res) > tdvw_min) {
+		dll_phy_dqs_timing = FIELD_PREP(CNF_PHY_DQS_SEL_OE_END, 4U) |
+				    CNF_PHY_DQS_USE_PHONY_DQS;
+		phony_dqs_timing = sampling_point / phony_dqs_mod;
+
+		if ((sampling_point % 2U) > 0U) {
+			dll_phy_dqs_timing |= CNF_PHY_DQS_PHONY_DQS_SEL;
+			if ((tdvw_max % dqs_sampl_res) == 0U) {
+				phony_dqs_timing = (tdvw_max / dqs_sampl_res) /
+						   phony_dqs_mod - 1U;
+			}
+			if (!is_phy_type_dll) {
+				phony_dqs_timing--;
+			}
+		} else {
+			phony_dqs_timing--;
+		}
+		rd_del_sel = phony_dqs_timing + 3U;
+	} else {
+		LOG_WRN("No valid sampling point for ONFI SDR mode %d", mode);
+	}
+
+	reg = FIELD_PREP(CNF_PHY_CTRL_PHONY_DQS, phony_dqs_timing);
+	if (is_phy_type_dll) {
+		reg |= CNF_PHY_CTRL_SDR_DQS;
+	}
+	t->phy_ctrl = reg;
+
+	if (is_phy_type_dll) {
+		t->phy_dqs_timing = dll_phy_dqs_timing;
+		t->phy_gate_lpbk_ctrl = FIELD_PREP(CNF_PHY_GATE_LPBK_RDS, rd_del_sel);
+	}
+
+	LOG_INF("setup_data_interface mode=%d clk=%uHz period=%ups async=0x%x t0=0x%x t1=0x%x t2=0x%x",
+		mode, nf_clk, clk_period, t->async_toggle_timings, t->timings0,
+		t->timings1, t->timings2);
+
+	return 0;
+}
+
+static void cdns_nand_set_timings(struct cadence_nand_params *params,
+				  const struct cadence_nand_timings *t,
+				  bool is_phy_type_dll)
+{
+	uintptr_t base_address = params->nand_base;
+
+	sys_write32(t->async_toggle_timings,
+		    CNF_MINICTRL(base_address, ASYNC_TOGGLE_TIMINGS));
+	sys_write32(t->timings0, CNF_MINICTRL(base_address, TIMINGS0));
+	sys_write32(t->timings1, CNF_MINICTRL(base_address, TIMINGS1));
+	sys_write32(t->timings2, CNF_MINICTRL(base_address, TIMINGS2));
+
+	if (is_phy_type_dll) {
+		sys_write32(t->dll_phy_ctrl, CNF_MINICTRL(base_address, DLL_PHY_CTRL));
+	}
+
+	sys_write32(t->phy_ctrl, base_address + PHY_CTRL_REG_OFFSET);
+
+	if (is_phy_type_dll) {
+		sys_write32(0U, base_address + PHY_TSEL_REG_OFFSET);
+		sys_write32(2U, base_address + PHY_DQ_TIMING_REG_OFFSET);
+		sys_write32(t->phy_dqs_timing, base_address + PHY_DQS_TIMING_REG_OFFSET);
+		sys_write32(t->phy_gate_lpbk_ctrl, base_address + PHY_GATE_LPBK_OFFSET);
+		sys_write32(CNF_PHY_DLL_MASTER_BYPASS, base_address + PHY_DLL_MASTER_OFFSET);
+		sys_write32(0U, base_address + PHY_DLL_SLAVE_OFFSET);
+	}
+}
 
 /**
  * Set the operational mode for the Cadence NAND controller.
  *
- * @param base_address The base address of the Cadence NAND controller.
- * @param opr_mode The operational mode  SDR / NVDDR to set.
+ * @param params Cadence NAND parameters (base, clock, board delay).
+ * @param opr_mode The operational mode SDR / NVDDR to set.
  * @retval  0 on success or negative error value on failure.
  */
-static int cdns_nand_set_opr_mode(uintptr_t base_address, uint8_t opr_mode)
+static int cdns_nand_set_opr_mode(struct cadence_nand_params *params, uint8_t opr_mode)
 {
+	uintptr_t base_address = params->nand_base;
+	struct cadence_nand_timings timings;
 	uint8_t device_type;
 	uint32_t timing_mode = 0;
 	uint32_t status;
+	uint32_t features;
+	bool is_phy_type_dll;
 	int ret;
 
-	if (opr_mode == CNF_OPR_WORK_MODE_SDR) {
+	features = sys_read32(CNF_CTRLPARAM(base_address, FEATURE));
+	is_phy_type_dll = CNF_HW_NVDDR_SUPPORT(features) != 0U;
 
+	if (opr_mode == CNF_OPR_WORK_MODE_SDR) {
 		status = ONFI_TIMING_MODE_SDR(
 			sys_read32(CNF_CTRLPARAM(base_address, ONFI_TIMING_0)));
-		timing_mode = find_lsb_set(status) - 1;
+		/* Highest supported ONFI mode (U-Boot / Linux prefer fastest). */
+		timing_mode = find_msb_set(status);
+		if (timing_mode == 0U) {
+			timing_mode = 0U;
+		} else {
+			timing_mode -= 1U;
+		}
 
-		/* PHY Register Timing setting*/
-		sys_write32(PHY_CTRL_REG_SDR, (base_address + PHY_CTRL_REG_OFFSET));
-		sys_write32(PHY_TSEL_REG_SDR, (base_address + PHY_TSEL_REG_OFFSET));
-		sys_write32(PHY_DQ_TIMING_REG_SDR, (base_address + PHY_DQ_TIMING_REG_OFFSET));
-		sys_write32(PHY_DQS_TIMING_REG_SDR, (base_address + PHY_DQS_TIMING_REG_OFFSET));
-		sys_write32(PHY_GATE_LPBK_CTRL_REG_SDR, (base_address + PHY_GATE_LPBK_OFFSET));
-		sys_write32(PHY_DLL_MASTER_CTRL_REG_SDR, (base_address + PHY_DLL_MASTER_OFFSET));
+		ret = cdns_nand_setup_data_interface(params, (int)timing_mode,
+						     is_phy_type_dll, &timings);
+		if (ret != 0) {
+			LOG_ERR("setup_data_interface failed (%d), mode %u",
+				ret, timing_mode);
+			return ret;
+		}
+		cdns_nand_set_timings(params, &timings, is_phy_type_dll);
 
-		/* Async mode timing settings */
-		sys_write32((CNF_ASYNC_TIMINGS_TRH) | (CNF_ASYNC_TIMINGS_TRP) |
-				    (CNF_ASYNC_TIMINGS_TWH) | (CNF_ASYNC_TIMINGS_TWP),
-			    CNF_MINICTRL(base_address, ASYNC_TOGGLE_TIMINGS));
-
-		/* Set operation work mode in common settings */
 		sys_clear_bits(CNF_MINICTRL(base_address, CMN_SETTINGS),
 			       CNF_OPR_WORK_MODE_SDR_MASK);
-
 	} else {
-		/* NVDDR MODE */
+		/* NVDDR MODE — keep legacy PHY constants for now */
 		status = ONFI_TIMING_MODE_NVDDR(
 			sys_read32(CNF_CTRLPARAM(base_address, ONFI_TIMING_0)));
-		timing_mode = find_lsb_set(status) - 1;
-		/* PHY Register Timing setting*/
+		timing_mode = find_msb_set(status);
+		if (timing_mode != 0U) {
+			timing_mode -= 1U;
+		}
+
 		sys_write32(PHY_CTRL_REG_DDR, (base_address + PHY_CTRL_REG_OFFSET));
 		sys_write32(PHY_TSEL_REG_DDR, (base_address + PHY_TSEL_REG_OFFSET));
 		sys_write32(PHY_DQ_TIMING_REG_DDR, (base_address + PHY_DQ_TIMING_REG_OFFSET));
 		sys_write32(PHY_DQS_TIMING_REG_DDR, (base_address + PHY_DQS_TIMING_REG_OFFSET));
 		sys_write32(PHY_GATE_LPBK_CTRL_REG_DDR, (base_address + PHY_GATE_LPBK_OFFSET));
 		sys_write32(PHY_DLL_MASTER_CTRL_REG_DDR, (base_address + PHY_DLL_MASTER_OFFSET));
-		/* Set operation work mode in common settings */
 		sys_set_bits(CNF_MINICTRL(base_address, CMN_SETTINGS),
 			     CNF_OPR_WORK_MODE_NVDDR_MASK);
 	}
 
-	/* Wait for controller to be in idle state */
+	ARG_UNUSED(timing_mode);
+
 	ret = cdns_nand_wait_idle(base_address);
 	if (ret != 0) {
 		LOG_ERR("Wait for controller to be in idle state Failed");
 		return ret;
 	}
 
-	/* Check device type */
 	device_type = CNF_GET_DEV_TYPE(sys_read32(CNF_CTRLPARAM(base_address, DEV_PARAMS0)));
-
 	if (device_type != ONFI_INTERFACE) {
 		LOG_ERR("Driver does not support this interface");
 		return -ENOTSUP;
 	}
-	/* Reset DLL PHY */
+
 	sys_clear_bit(CNF_MINICTRL(base_address, DLL_PHY_CTRL), CNF_DLL_PHY_RST_N);
 
-	/* Wait for controller to be in idle state */
 	ret = cdns_nand_wait_idle(base_address);
 	if (ret != 0) {
 		LOG_ERR("Wait for controller to be in idle state Failed");
 		return ret;
 	}
 
-	ret = cdns_nand_pio_set_features(base_address, SET_FEAT_TIMING_MODE_ADDRESS, timing_mode,
-					 NF_TDEF_TRD_NUM, VOL_ID);
-	if (ret != 0) {
-		return ret;
-	}
-
-	ret = cdns_pio_transfer_complete(base_address, NF_TDEF_TRD_NUM);
-	if (ret != 0) {
-		LOG_ERR("cdns pio check failed");
-		return ret;
-	}
-
-	ret = cdns_nand_wait_idle(base_address);
-	if (ret != 0) {
-		LOG_ERR("Wait for controller to be in idle state Failed");
-		return ret;
-	}
-
-	/* set dll_rst_n in dll_phy_ctrl to 1 */
 	sys_set_bit(CNF_MINICTRL(base_address, DLL_PHY_CTRL), CNF_DLL_PHY_RST_N);
 
 	ret = cdns_nand_wait_idle(base_address);
@@ -314,30 +696,165 @@ static int cdns_nand_set_opr_mode(uintptr_t base_address, uint8_t opr_mode)
 }
 
 /**
+ * ECC bytes per sector — same formula as U-Boot cadence_nand_calc_ecc_bytes().
+ * Depends on the controller's maximum BCH step size and the chosen strength.
+ */
+static uint32_t cdns_nand_calc_ecc_bytes(uint32_t max_step_size, uint32_t strength)
+{
+	uint32_t nbytes;
+
+	if ((max_step_size == 0U) || (strength == 0U)) {
+		return 0U;
+	}
+
+	nbytes = DIV_ROUND_UP(find_msb_set(8U * max_step_size) * strength, 8U);
+	return ROUND_UP(nbytes, 2U);
+}
+
+/**
+ * available_spare = spare_size - ecc_size, capped by BCH metadata size
+ * (U-Boot cadence_nand attach path). Used as OOB added to last_sector_size.
+ */
+static uint32_t cdns_nand_avail_spare(struct cadence_nand_params *params,
+				      uint32_t sector_cnt)
+{
+	uintptr_t base_address = params->nand_base;
+	uint32_t strengths[CNF_BCH_MAX_CORR_CAPS];
+	uint32_t max_step_size;
+	uint32_t strength;
+	uint32_t ecc_bytes;
+	uint32_t ecc_size;
+	uint32_t avail;
+	uint32_t metadata;
+	uint32_t reg;
+	uint32_t corr_idx = CNF_ECC_CORR_STR;
+
+	reg = sys_read32(CNF_CTRLPARAM(base_address, BCH_CFG0));
+	strengths[0] = FIELD_GET(CNF_BCH_CFG0_CORR_CAP_0, reg);
+	strengths[1] = FIELD_GET(CNF_BCH_CFG0_CORR_CAP_1, reg);
+	strengths[2] = FIELD_GET(CNF_BCH_CFG0_CORR_CAP_2, reg);
+	strengths[3] = FIELD_GET(CNF_BCH_CFG0_CORR_CAP_3, reg);
+
+	reg = sys_read32(CNF_CTRLPARAM(base_address, BCH_CFG1));
+	strengths[4] = FIELD_GET(CNF_BCH_CFG1_CORR_CAP_4, reg);
+	strengths[5] = FIELD_GET(CNF_BCH_CFG1_CORR_CAP_5, reg);
+	strengths[6] = FIELD_GET(CNF_BCH_CFG1_CORR_CAP_6, reg);
+	strengths[7] = FIELD_GET(CNF_BCH_CFG1_CORR_CAP_7, reg);
+
+	reg = sys_read32(CNF_CTRLPARAM(base_address, BCH_CFG2));
+	max_step_size = FIELD_GET(CNF_BCH_CFG2_SECT_0, reg);
+	reg = FIELD_GET(CNF_BCH_CFG2_SECT_1, reg);
+	if (reg > max_step_size) {
+		max_step_size = reg;
+	}
+
+	reg = sys_read32(CNF_CTRLPARAM(base_address, BCH_CFG3));
+	metadata = FIELD_GET(CNF_BCH_CFG3_METADATA_SIZE, reg);
+
+	if ((corr_idx >= CNF_BCH_MAX_CORR_CAPS) || (strengths[corr_idx] == 0U) ||
+	    (max_step_size == 0U) || (sector_cnt == 0U) ||
+	    (params->spare_size == 0U)) {
+		return 0U;
+	}
+
+	strength = strengths[corr_idx];
+	ecc_bytes = cdns_nand_calc_ecc_bytes(max_step_size, strength);
+	if (ecc_bytes == 0U) {
+		return 0U;
+	}
+
+	ecc_size = sector_cnt * ecc_bytes;
+	if (ecc_size >= params->spare_size) {
+		LOG_ERR("ECC size %u exceeds spare %u (str=%u step_max=%u)",
+			ecc_size, params->spare_size, strength, max_step_size);
+		return 0U;
+	}
+
+	avail = params->spare_size - ecc_size;
+	if ((metadata != 0U) && (avail > metadata)) {
+		avail = metadata;
+	}
+
+	/* Same BBM reservation check as U-Boot (bbm_len == skip marker bytes). */
+	if ((avail + CNF_NSKIP_BYTES + ecc_size) > params->spare_size) {
+		if (avail > 4U) {
+			avail -= 4U;
+		}
+	}
+
+	LOG_INF("BCH strength=%u max_step=%u ecc/sec=%u ecc_total=%u meta=%u avail_oob=%u",
+		strength, max_step_size, ecc_bytes, ecc_size, metadata, avail);
+
+	return avail;
+}
+
+/**
  * Configure the transfer settings of the Cadence NAND controller.
  *
- * @param base_address The base address of the Cadence NAND controller.
+ * Packs TRANS_CFG0/1 like ATF. last_sector_size uses U-Boot's
+ * available_spare = spare_size - ecc_size (capped by BCH metadata).
+ *
+ * @param params The Cadence NAND parameters structure.
  * @retval  0 on success or -ETIMEDOUT error value on failure.
  */
-static int cdns_nand_transfer_config(uintptr_t base_address)
+static int cdns_nand_transfer_config(struct cadence_nand_params *params)
 {
-	int ret = 0;
-	/* Wait for controller to be in idle state */
-	ret = cdns_nand_wait_idle(base_address);
+	uintptr_t base_address = params->nand_base;
+	uint32_t sector_cnt = CNF_SECTOR_CNT;
+	uint32_t sector_size = CNF_SECTOR_SIZE;
+	uint32_t last_sector_size = CNF_LAST_SECTOR_SIZE;
+	uint32_t skip_offset = CNF_SKIP_BYTES_OFFSET_VAL;
+	uint32_t avail_oob;
+	uint32_t trans_cfg0;
+	uint32_t trans_cfg1;
+	int ret;
 
+	ret = cdns_nand_wait_idle(base_address);
 	if (ret != 0) {
 		LOG_ERR("Wait for controller to be in idle state Failed");
 		return ret;
 	}
 
-	/* Configure data transfer parameters */
-	sys_write32(ENABLE, CNF_CTRLCFG(base_address, TRANS_CFG0));
+	/*
+	 * U-Boot TT_MAIN_OOB_AREAS:
+	 *   ecc_size         = sector_cnt * calc_ecc_bytes(max_step, strength)
+	 *   available_spare  = min(spare_size - ecc_size, bch_metadata_size)
+	 *   last_sector_size = sector_size + available_spare
+	 */
+	if ((params->page_size != 0U) &&
+	    ((params->page_size % CNF_SECTOR_SIZE) == 0U)) {
+		sector_size = CNF_SECTOR_SIZE;
+		sector_cnt = params->page_size / sector_size;
+		avail_oob = cdns_nand_avail_spare(params, sector_cnt);
+		if (avail_oob != 0U) {
+			last_sector_size = sector_size + avail_oob;
+		}
+		skip_offset = params->page_size;
+	}
+
+	trans_cfg0 = sector_cnt |
+		     FIELD_PREP(CNF_SECTOR_OFFSET_MASK, CNF_SECTOR_OFFSET);
+	trans_cfg1 = sector_size |
+		     FIELD_PREP(CNF_LAST_SECTOR_MASK, last_sector_size);
+
+	sys_write32(trans_cfg0, CNF_CTRLCFG(base_address, TRANS_CFG0));
+	sys_write32(trans_cfg1, CNF_CTRLCFG(base_address, TRANS_CFG1));
 
 	/* Disable cache and multiplane. */
 	sys_write32(DISABLE, CNF_CTRLCFG(base_address, MULTIPLANE_CFG));
 	sys_write32(DISABLE, CNF_CTRLCFG(base_address, CACHE_CFG));
 
-	/* Clear all interrupts. */
+	/* ECC / skip — same packing as ATF CNF_ECC_CFG0_VAL / SKIP_BYTES_* */
+	sys_write32(CNF_ECC_CFG0_VAL, CNF_CTRLCFG(base_address, ECC_CFG0));
+	sys_write32(CNF_ECC_CFG1_VAL, CNF_CTRLCFG(base_address, ECC_CFG1));
+	sys_write32(CNF_SKIP_BYTES_CFG_VAL, CNF_MINICTRL(base_address, SKIP_BYTES_CFG));
+	sys_write32(skip_offset, CNF_MINICTRL(base_address, SKIP_BYTES_OFFSET));
+
+	/* TIMINGS and PHY programmed by cdns_nand_setup_data_interface() */
+
+	LOG_INF("TRANS_CFG0=0x%x TRANS_CFG1=0x%x (sec=%u cnt=%u last=%u)",
+		trans_cfg0, trans_cfg1, sector_size, sector_cnt, last_sector_size);
+
 	sys_write32(CLEAR_ALL_INTERRUPT, (base_address + INTR_STATUS));
 	return 0;
 }
@@ -350,7 +867,6 @@ static int cdns_nand_transfer_config(uintptr_t base_address)
  */
 int cdns_nand_init(struct cadence_nand_params *params)
 {
-	uint32_t reg_value_read = 0;
 	uintptr_t base_address = params->nand_base;
 	uint8_t datarate_mode = params->datarate_mode;
 	int ret;
@@ -371,6 +887,7 @@ int cdns_nand_init(struct cadence_nand_params *params)
 		return ret;
 	}
 
+#if 0
 	/* Hardware Support Features */
 	reg_value_read = sys_read32(CNF_CTRLPARAM(base_address, FEATURE));
 	/* Enable data integrity parity check if the data integrity parity mechanism is */
@@ -384,6 +901,7 @@ int cdns_nand_init(struct cadence_nand_params *params)
 	if (CNF_HW_DI_CRC_SUPPORT(reg_value_read) != 0) {
 		sys_set_bit(CNF_DI(base_address, CONTROL), CNF_DI_CRC_EN);
 	}
+
 	/* Status polling mode, device control and status register */
 	ret = cdns_nand_wait_idle(base_address);
 
@@ -392,15 +910,15 @@ int cdns_nand_init(struct cadence_nand_params *params)
 		return ret;
 	}
 	sys_write32(DEV_STAT_DEF_VALUE, CNF_CTRLCFG(base_address, DEV_STAT));
-
-	/* Set operation work mode */
-	ret = cdns_nand_set_opr_mode(base_address, datarate_mode);
+#endif
+	/* Set operation work mode (runs cadence_setup_data_interface for SDR) */
+	ret = cdns_nand_set_opr_mode(params, datarate_mode);
 	if (ret != 0) {
 		return ret;
 	}
 
 	/* Set data transfer configuration parameters */
-	ret = cdns_nand_transfer_config(base_address);
+	ret = cdns_nand_transfer_config(params);
 	if (ret != 0) {
 		return ret;
 	}
@@ -411,7 +929,6 @@ int cdns_nand_init(struct cadence_nand_params *params)
 		LOG_ERR("Wait for controller to be in idle state Failed");
 		return ret;
 	}
-
 	/* DMA Setting */
 	sys_write32((F_BURST_SEL_SET(NF_TDEF_BURST_SEL)) | (BIT(F_OTE)),
 		    (base_address + NF_DMA_SETTING));
@@ -420,6 +937,7 @@ int cdns_nand_init(struct cadence_nand_params *params)
 	sys_write32(((NF_FIFO_TRIGG_LVL_SET(PRE_FETCH_VALUE)) |
 		     (NF_DMA_PACKAGE_SIZE_SET(PRE_FETCH_VALUE))),
 		    (base_address + NF_PRE_FETCH));
+
 	/* Total bits in row addressing*/
 	params->total_bit_row = find_msb_set(((params->npages_per_block) - 1)) +
 				find_msb_set((params->nblocks_per_lun) - 1);
@@ -430,8 +948,13 @@ int cdns_nand_init(struct cadence_nand_params *params)
 	}
 	/* Enable Global Interrupt for NAND*/
 #ifdef CONFIG_CDNS_NAND_INTERRUPT_SUPPORT
-	sys_set_bit((base_address + INTERRUPT_STATUS_REG), GINTR_ENABLE);
+	sys_set_bits((base_address + INTERRUPT_STATUS_REG),
+			(BIT(GINTR_ENABLE) | BIT(CMD_ETE_INTR_ENABLE)));
+	sys_write32(ENABLE, base_address + THREAD_INTERRUPT_ERROR_ENABLE);
 #endif
+
+	k_msleep(100);
+	cdns_nand_dump_regs(base_address);
 	return 0;
 }
 
@@ -456,19 +979,19 @@ void cdns_nand_cdma_prepare(char nf_mem, uint32_t flash_ptr, char *mem_ptr, uint
 	struct cdns_cdma_command_descriptor *cdma_desc;
 
 	cdma_desc = desc;
+	memset(cdma_desc, 0, sizeof(*cdma_desc));
 	/* set fields for one descriptor */
 	cdma_desc->flash_pointer = flash_ptr;
 	cdma_desc->bank_number = nf_mem;
-	cdma_desc->command_flags |= CDMA_CF_DMA_MASTER_SET(dma_sel) | F_CFLAGS_VOL_ID_SET(vol_id);
-	cdma_desc->memory_pointer = (uintptr_t)mem_ptr;
+	cdma_desc->command_flags = CDMA_CF_DMA_MASTER_SET(dma_sel) | F_CFLAGS_VOL_ID_SET(vol_id);
+	cdma_desc->memory_pointer = (mem_ptr != NULL) ? k_mem_phys_addr(mem_ptr) : 0;
 	cdma_desc->status = 0;
 	cdma_desc->sync_flag_pointer = 0;
 	cdma_desc->sync_arguments = 0;
-	cdma_desc->ctrl_data_ptr = 0x40;
+	cdma_desc->ctrl_data_ptr = 0;
 	cdma_desc->command_type = ctype;
 	if (cmd_cnt > 1) {
-		cdma_desc->next_pointer = (uintptr_t)(desc + 1);
-		cdma_desc->command_flags |= CFLAGS_MPTRPC_SET | CFLAGS_MPTRPC_SET;
+		cdma_desc->next_pointer = k_mem_phys_addr(desc + 1);
 		cdma_desc->command_flags |= CFLAGS_CONT_SET;
 	} else {
 		cdma_desc->next_pointer = 0;
@@ -476,6 +999,7 @@ void cdns_nand_cdma_prepare(char nf_mem, uint32_t flash_ptr, char *mem_ptr, uint
 		cdma_desc->command_flags |= CDMA_CF_INT_SET;
 #endif
 	}
+	sys_cache_data_flush_and_invd_range(cdma_desc, sizeof(*cdma_desc));
 }
 
 /**
@@ -496,7 +1020,7 @@ static int cdns_transfer_complete(struct cdns_cdma_command_descriptor *desc_ptr,
 	status = sys_read32((params->nand_base + CMD_STAT_CMD_STATUS));
 	if ((status & (BIT(F_CSTAT_COMP)))) {
 		if ((status & (BIT(F_CSTAT_FAIL)))) {
-			LOG_ERR("Cadence status operation failed %s", __func__);
+			LOG_ERR("Cadence status operation failed %x", status);
 			return -EIO;
 		}
 	} else {
@@ -506,13 +1030,16 @@ static int cdns_transfer_complete(struct cdns_cdma_command_descriptor *desc_ptr,
 #else
 	ARG_UNUSED(params);
 
-	if (!WAIT_FOR(((desc_ptr->status & (BIT(F_CSTAT_COMP))) != 0), IDLE_TIME_OUT,
-		      k_msleep(1))) {
+	sys_cache_data_invd_range(desc_ptr, sizeof(*desc_ptr));
+	if (!WAIT_FOR(((desc_ptr->status & (BIT(F_CSTAT_COMP))) != 0), IDLE_TIME_OUT, ({
+			      k_msleep(1);
+			      sys_cache_data_invd_range(desc_ptr, sizeof(*desc_ptr));
+		      }))) {
 		LOG_ERR("Timed out waiting for thread status response");
 		return -ETIMEDOUT;
 	}
 	if ((desc_ptr->status & (BIT(F_CSTAT_FAIL))) != 0) {
-		LOG_ERR("Cadence status operation failed %s", __func__);
+		LOG_ERR("Cadence status operation failed %llx", desc_ptr->status);
 		return -EIO;
 	}
 #endif
@@ -533,7 +1060,7 @@ static int cdns_nand_send(uintptr_t base_address, char *desc_ptr, uint8_t thread
 	uint32_t status;
 	int ret;
 
-	desc_address = (uint64_t)desc_ptr;
+	desc_address = k_mem_phys_addr(desc_ptr);
 
 	ret = cdns_wait_for_thread(base_address, thread);
 
@@ -559,57 +1086,55 @@ static int cdns_cdma_desc_transfer_finish(struct cadence_nand_params *params, ui
 	uint32_t page_count_pass = 0;
 	uint32_t row_address = 0;
 	uint32_t base_address;
-	uint32_t page_buffer_size;
-	struct cdns_cdma_command_descriptor *cdma_desc;
 	int ret;
 
-	page_buffer_size = (page_count > max_page_desc) ? max_page_desc : page_count;
-
-	cdma_desc = k_malloc(sizeof(struct cdns_cdma_command_descriptor) * page_buffer_size);
-
-	if (cdma_desc == NULL) {
-		LOG_ERR("Memory allocation error occurred %s", __func__);
-		return -ENOSR;
+	if (max_page_desc > CDNS_NAND_CDMA_DESC_MAX) {
+		LOG_ERR("CDMA descriptor count exceeds static buffer");
+		return -EINVAL;
 	}
 
 	base_address = params->nand_base;
 
 	while (page_count > 0) {
-		row_address_set(params, &row_address, cond_start);
+		uint32_t batch_start = cond_start;
+		uint32_t addr_step = (ctype == CNF_CMD_ERASE) ? params->npages_per_block : 1U;
 
 		if (page_count > max_page_desc) {
 			page_count_pass = max_page_desc;
 			page_count = page_count - max_page_desc;
-			cond_start = cond_start + page_count_pass;
 		} else {
 			page_count_pass = page_count;
-			page_count = page_count - page_count_pass;
+			page_count = 0;
 		}
+		cond_start = batch_start + (page_count_pass * addr_step);
+
 		for (int index = 0; index < page_count_pass; index++) {
-			cdns_nand_cdma_prepare(NF_TDEF_DEV_NUM, row_address, buffer,
-					       (ctype + index), (page_count_pass - index),
-					       DMA_MS_SEL, VOL_ID, (cdma_desc + index));
+			char *page_buf = NULL;
+
+			row_address_set(params, &row_address, batch_start + (index * addr_step));
+			if (ctype != CNF_CMD_ERASE && buffer != NULL) {
+				page_buf = buffer + (index * params->page_size);
+			}
+			cdns_nand_cdma_prepare(NF_TDEF_DEV_NUM, row_address, page_buf,
+					       ctype, (page_count_pass - index),
+					       DMA_MS_SEL, VOL_ID, &params->cdma_desc[index]);
 		}
-		ret = cdns_nand_send(base_address, (char *)cdma_desc, NF_TDEF_TRD_NUM);
+		ret = cdns_nand_send(base_address, (char *)params->cdma_desc, NF_TDEF_TRD_NUM);
 
 		if (ret != 0) {
-			k_free(cdma_desc);
 			return ret;
 		}
 
-		if (ctype != CNF_CMD_ERASE) {
-			buffer = buffer + (max_page_desc * params->page_size);
+		if (ctype != CNF_CMD_ERASE && buffer != NULL) {
+			buffer = buffer + (page_count_pass * params->page_size);
 		}
 
-		ret = cdns_transfer_complete(cdma_desc, params);
+		ret = cdns_transfer_complete(params->cdma_desc, params);
 
 		if (ret != 0) {
-			k_free(cdma_desc);
 			return ret;
 		}
 	}
-
-	k_free(cdma_desc);
 
 	return 0;
 }
@@ -1157,6 +1682,47 @@ static inline int cdns_read_data(struct cadence_nand_params *params, uint32_t st
 }
 
 /**
+ * Write data pages to the Cadence NAND controller from a buffer.
+ */
+static inline int cdns_write_data(struct cadence_nand_params *params, uint32_t start_page_number,
+				 const void *buffer, uint32_t page_count)
+{
+	int ret;
+
+#if CONFIG_CDNS_NAND_CDMA_MODE
+	ret = cdns_nand_cdma_write(params, start_page_number, (char *)buffer, page_count);
+#elif CONFIG_CDNS_NAND_PIO_MODE
+	ret = cdns_nand_pio_read_write(params, start_page_number, (char *)buffer, page_count,
+				       CDNS_WRITE);
+#elif CONFIG_CDNS_NAND_GENERIC_MODE
+	ret = cdns_nand_gen_read_write(params, start_page_number, (char *)buffer, page_count,
+			CDNS_WRITE);
+#endif
+
+	return ret;
+}
+
+/**
+ * Erase blocks of the Cadence NAND controller.
+ */
+static inline int cdns_erase_block(struct cadence_nand_params *params, uint32_t start_page_number,
+		uint32_t page_count)
+{
+	int ret;
+
+#if CONFIG_CDNS_NAND_CDMA_MODE
+	ret = cdns_nand_cdma_erase(params, start_page_number, page_count);
+#elif CONFIG_CDNS_NAND_PIO_MODE
+	ret = cdns_nand_pio_erase(params, NF_TDEF_TRD_NUM, NF_TDEF_DEV_NUM, start_page_number,
+				  CNF_CMD_ERASE, page_count);
+#elif CONFIG_CDNS_NAND_GENERIC_MODE
+	ret = cdns_nand_gen_erase(params, start_page_number, page_count);
+#endif
+
+	return ret;
+}
+
+/**
  * Read data from the Cadence NAND controller into a buffer.
  *
  * @param params The Cadence NAND parameters structure.
@@ -1168,17 +1734,14 @@ static inline int cdns_read_data(struct cadence_nand_params *params, uint32_t st
 int cdns_nand_read(struct cadence_nand_params *params, const void *buffer, uint32_t offset,
 		   uint32_t size)
 {
-	uint32_t start_page_number;
+	uint32_t page_number;
 	uint32_t end_page_number;
-	uint32_t page_count;
+	int page_offset;
+	int num_bytes;
+	int page_buf_size;
 	int ret = 0;
-	uint16_t r_bytes;
-	uint16_t bytes_dif;
-	uint16_t lp_bytes_dif;
-	uint8_t check_page_first = 0;
-	uint8_t check_page_last = 0;
-	uint8_t *first_end_page;
-	uint8_t *last_end_page;
+	char *ptr = (char *)buffer;
+	uint32_t rem_bytes = size;
 
 	if (params == NULL) {
 		LOG_ERR("Wrong parameter passed!!");
@@ -1194,146 +1757,39 @@ int cdns_nand_read(struct cadence_nand_params *params, const void *buffer, uint3
 		return -EINVAL;
 	}
 
-	start_page_number = offset / (params->page_size);
+	page_buf_size = params->page_size + params->spare_size;
+	if (page_buf_size > CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE) {
+		LOG_ERR("Page+spare %d exceeds static buffer %d", page_buf_size,
+			CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE);
+		return -ENOMEM;
+	}
+
+	page_number = offset / (params->page_size);
 	end_page_number = ((offset + size) - 1) / ((params->page_size));
+	page_offset = offset % (params->page_size);
+	while (page_number <= end_page_number) {
+		size_t cache_len = ROUND_UP(page_buf_size, CDNS_NAND_DMA_ALIGN);
 
-	if ((offset % params->page_size) == 0) {
-		check_page_first = 1;
-	}
-	if (((offset + size) % params->page_size) == 0) {
-		check_page_last = 1;
-	}
-	page_count = end_page_number - start_page_number;
-	page_count++;
-	if ((check_page_last == 1) && (check_page_first == 1)) {
-		ret = cdns_read_data(params, start_page_number, (char *)buffer, page_count);
+		memset(params->page_buf, 0xFF, cache_len);
+		sys_cache_data_flush_and_invd_range(params->page_buf, cache_len);
+		ret = cdns_read_data(params, page_number, params->page_buf, 1);
+
 		if (ret != 0) {
-			return ret;
+			LOG_ERR("Cadence driver read Failed!!!");
+			break;
 		}
 
-	} else if (((check_page_last == 0) && (check_page_first == 1) && (page_count == 1)) ||
-		   ((check_page_last == 0) && (check_page_first == 0) && (page_count == 1)) ||
-		   ((check_page_last == 1) && (check_page_first == 0) && (page_count == 1))) {
-		first_end_page = (char *)k_malloc(sizeof(char) * (params->page_size));
-		if (first_end_page != NULL) {
-			memset(first_end_page, 0xFF, sizeof(char) * (params->page_size));
-		} else {
-			LOG_ERR("Memory allocation error occurred %s", __func__);
-			return -ENOSR;
-		}
-		ret = cdns_read_data(params, start_page_number, first_end_page, page_count);
-		if (ret != 0) {
-			k_free(first_end_page);
-			return ret;
-		}
-		memcpy((char *)buffer, first_end_page + (offset % (params->page_size)), size);
-		k_free(first_end_page);
-	} else if (((check_page_last == 0) && (check_page_first == 1) && (page_count == 2)) ||
-		   ((check_page_last == 0) && (check_page_first == 0) && (page_count == 2)) ||
-		   ((check_page_last == 1) && (check_page_first == 0) && (page_count == 2))) {
-		first_end_page = (char *)k_malloc(sizeof(char) * (params->page_size * 2));
-		if (first_end_page != NULL) {
-			memset(first_end_page, 0xFF, sizeof(char) * (params->page_size * 2));
-		} else {
-			LOG_ERR("Memory allocation error occurred %s", __func__);
-			return -ENOSR;
-		}
-		ret = cdns_read_data(params, start_page_number, first_end_page, page_count);
-		if (ret < 0) {
-			k_free(first_end_page);
-			return ret;
-		}
-		memcpy((char *)buffer, first_end_page + (offset % (params->page_size)), size);
-		k_free(first_end_page);
+		sys_cache_data_invd_range(params->page_buf, cache_len);
+		num_bytes = MIN(params->page_size - page_offset, rem_bytes);
+		memcpy(ptr, params->page_buf + page_offset, num_bytes);
+		ptr += num_bytes;
+		rem_bytes -= num_bytes;
 
-	} else if ((check_page_last == 0) && (check_page_first == 1) && (page_count > 2)) {
-		first_end_page = (char *)k_malloc(sizeof(char) * (params->page_size));
-		if (first_end_page != NULL) {
-			memset(first_end_page, 0xFF, sizeof(char) * (params->page_size));
-		} else {
-			LOG_ERR("Memory allocation error occurred %s", __func__);
-			return -ENOSR;
-		}
-		ret = cdns_read_data(params, end_page_number, first_end_page, 1);
-		if (ret < 0) {
-			k_free(first_end_page);
-			return ret;
-		}
-		r_bytes = (offset + size) % (params->page_size);
-		ret = cdns_read_data(params, start_page_number, (char *)buffer, (--page_count));
-		if (ret != 0) {
-			k_free(first_end_page);
-			return ret;
-		}
-
-		memcpy((char *)buffer + ((page_count - 1) * params->page_size), first_end_page,
-		       r_bytes);
-		k_free(first_end_page);
-
-	} else if ((check_page_last == 1) && (check_page_first == 0) && (page_count > 2)) {
-		first_end_page = (char *)k_malloc(sizeof(char) * (params->page_size));
-		if (first_end_page != NULL) {
-			memset(first_end_page, 0xFF, sizeof(char) * (params->page_size));
-		} else {
-			LOG_ERR("Memory allocation error occurred %s", __func__);
-			return -ENOSR;
-		}
-		ret = cdns_read_data(params, start_page_number, first_end_page, 1);
-		if (ret < 0) {
-			k_free(first_end_page);
-			return ret;
-		}
-		r_bytes = (offset) % (params->page_size);
-		bytes_dif = (((start_page_number + 1) * params->page_size) - r_bytes);
-		r_bytes = (offset + size) % (params->page_size);
-		ret = cdns_read_data(params, (++start_page_number), ((char *)buffer + bytes_dif),
-				     (--page_count));
-		if (ret != 0) {
-			k_free(first_end_page);
-			return ret;
-		}
-		memcpy((char *)buffer, first_end_page + r_bytes, bytes_dif);
-		k_free(first_end_page);
-	} else if ((check_page_last == 0) && (check_page_first == 0) && (page_count > 2)) {
-		first_end_page = (char *)k_malloc(sizeof(char) * (params->page_size));
-		last_end_page = (char *)k_malloc(sizeof(char) * (params->page_size));
-		if ((first_end_page != NULL) && (last_end_page != NULL)) {
-			memset(first_end_page, 0xFF, sizeof(char) * (params->page_size));
-			memset(last_end_page, 0xFF, sizeof(char) * (params->page_size));
-		} else {
-			LOG_ERR("Memory allocation error occurred %s", __func__);
-			return -ENOSR;
-		}
-		ret = cdns_read_data(params, start_page_number, first_end_page, 1);
-		if (ret != 0) {
-			k_free(first_end_page);
-			k_free(last_end_page);
-			return ret;
-		}
-		r_bytes = (offset) % (params->page_size);
-		bytes_dif = (((start_page_number + 1) * params->page_size) - r_bytes);
-		lp_bytes_dif = (offset + size) % (params->page_size);
-		ret = cdns_read_data(params, end_page_number, last_end_page, 1);
-		if (ret != 0) {
-			k_free(last_end_page);
-			k_free(first_end_page);
-			return ret;
-		}
-		r_bytes = (offset + size) % (params->page_size);
-		ret = cdns_read_data(params, (++start_page_number), ((char *)buffer + bytes_dif),
-				     (page_count - 2));
-		if (ret != 0) {
-			k_free(last_end_page);
-			k_free(first_end_page);
-			return ret;
-		}
-		memcpy((char *)buffer, first_end_page + r_bytes, bytes_dif);
-		memcpy(((char *)buffer + bytes_dif +
-			((page_count - 2) * (params->npages_per_block))),
-		       last_end_page, lp_bytes_dif);
+		page_offset = 0;
+		page_number++;
 	}
 
-	return 0;
+	return ret;
 }
 
 /**
@@ -1348,10 +1804,11 @@ int cdns_nand_read(struct cadence_nand_params *params, const void *buffer, uint3
 int cdns_nand_write(struct cadence_nand_params *params, const void *buffer, uint32_t offset,
 		    uint32_t len)
 {
-	uint32_t start_page_number;
+	uint32_t page_number;
 	uint32_t end_page_number;
-	uint32_t page_count;
 	int ret = 0;
+	char *ptr = (char *)buffer;
+	int page_buf_size;
 
 	if (params == NULL) {
 		LOG_ERR("Wrong parameter passed!!");
@@ -1377,21 +1834,31 @@ int cdns_nand_write(struct cadence_nand_params *params, const void *buffer, uint
 		return -EINVAL;
 	}
 
-	start_page_number = offset / (params->page_size);
-	end_page_number = ((offset + len) - 1) / ((params->page_size));
-	page_count = end_page_number - start_page_number;
+	page_buf_size = params->page_size + params->spare_size;
+	if (page_buf_size > CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE) {
+		LOG_ERR("Page+spare %d exceeds static buffer %d", page_buf_size,
+			CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE);
+		return -ENOMEM;
+	}
 
-#if CONFIG_CDNS_NAND_CDMA_MODE
-	ret = cdns_nand_cdma_write(params, start_page_number, (char *)buffer, ++page_count);
-#elif CONFIG_CDNS_NAND_PIO_MODE
-	ret = cdns_nand_pio_read_write(params, start_page_number, (char *)buffer, ++page_count,
-				       CDNS_WRITE);
-#elif CONFIG_CDNS_NAND_GENERIC_MODE
-	ret = cdns_nand_gen_read_write(params, start_page_number, (char *)buffer, ++page_count,
-				       CDNS_WRITE);
-#endif
-	if (ret != 0) {
-		LOG_ERR("Cadence driver write Failed!!!");
+	page_number = offset / (params->page_size);
+	end_page_number = ((offset + len) - 1) / ((params->page_size));
+	while (page_number <= end_page_number) {
+		size_t cache_len = ROUND_UP(page_buf_size, CDNS_NAND_DMA_ALIGN);
+
+		memcpy(params->page_buf, ptr, params->page_size);
+		memset(params->page_buf + params->page_size, 0xff,
+		       cache_len - params->page_size);
+		sys_cache_data_flush_range(params->page_buf, cache_len);
+		ret = cdns_write_data(params, page_number, params->page_buf, 1);
+
+		if (ret != 0) {
+			LOG_ERR("Cadence driver write Failed!!!");
+			break;
+		}
+
+		ptr += params->page_size;
+		page_number++;
 	}
 
 	return ret;
@@ -1407,10 +1874,10 @@ int cdns_nand_write(struct cadence_nand_params *params, const void *buffer, uint
  */
 int cdns_nand_erase(struct cadence_nand_params *params, uint32_t offset, uint32_t size)
 {
-	uint32_t start_block_number;
+	uint32_t page_number;
+	uint32_t block_number;
 	uint32_t end_block_number;
-	uint32_t block_count;
-	int ret;
+	int ret = 0;
 
 	if (params == NULL) {
 		LOG_ERR("Wrong parameter passed!!");
@@ -1436,20 +1903,18 @@ int cdns_nand_erase(struct cadence_nand_params *params, uint32_t offset, uint32_
 		return -EINVAL;
 	}
 
-	start_block_number = (offset / ((params->page_size))) / (params->npages_per_block);
+	block_number = (offset / ((params->page_size))) / (params->npages_per_block);
 	end_block_number =
 		(((offset + size) - 1) / ((params->page_size))) / (params->npages_per_block);
-	block_count = end_block_number - start_block_number;
-#if CONFIG_CDNS_NAND_CDMA_MODE
-	ret = cdns_nand_cdma_erase(params, start_block_number, ++block_count);
-#elif CONFIG_CDNS_NAND_PIO_MODE
-	ret = cdns_nand_pio_erase(params, NF_TDEF_TRD_NUM, NF_TDEF_DEV_NUM, start_block_number,
-				  CNF_CMD_ERASE, ++block_count);
-#elif CONFIG_CDNS_NAND_GENERIC_MODE
-	ret = cdns_nand_gen_erase(params, start_block_number, ++block_count);
-#endif
-	if (ret != 0) {
-		LOG_ERR("Cadence driver Erase Failed!!!");
+	while (block_number <= end_block_number) {
+		page_number = block_number * params->npages_per_block;
+		ret = cdns_erase_block(params, page_number, 1);
+
+		if (ret != 0) {
+			LOG_ERR("Cadence driver Erase Failed!!!");
+			break;
+		}
+		block_number++;
 	}
 
 	return ret;
@@ -1467,6 +1932,14 @@ void cdns_nand_irq_handler_ll(struct cadence_nand_params *params)
 	if (GET_INIT_SET_CHECK(status, (thread_num - 1)) != 0) {
 		/* Clear the interrupt*/
 		sys_write32(BIT((thread_num - 1)), params->nand_base + THREAD_INTERRUPT_STATUS);
+	}
+
+	status = sys_read32(params->nand_base + THREAD_INTERRUPT_ERROR);
+	thread_num = find_lsb_set(status);
+
+	if (GET_INIT_SET_CHECK(status, (thread_num - 1)) != 0) {
+		/* Clear the interrupt*/
+		sys_write32(BIT((thread_num - 1)), params->nand_base + THREAD_INTERRUPT_ERROR);
 	}
 }
 #endif

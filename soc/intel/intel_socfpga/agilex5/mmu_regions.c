@@ -47,10 +47,21 @@ static const struct arm_mmu_region mmu_regions[] = {
 #endif
 
 #if DT_NODE_EXISTS(DT_NODELABEL(fpga_config))
+	/* Non-cacheable so TFTP/CPU and NAND DMA see the same bytes on HW. */
 	MMU_REGION_FLAT_ENTRY("FPGA_CONFIG",
 			      DT_REG_ADDR(DT_NODELABEL(fpga_config)),
 			      DT_REG_SIZE(DT_NODELABEL(fpga_config)),
-			      MT_NORMAL | MT_P_RW_U_RW | MT_DEFAULT_SECURE_STATE),
+			      MT_NORMAL_NC | MT_P_RW_U_RW | MT_DEFAULT_SECURE_STATE),
+#endif
+
+#if DT_NODE_EXISTS(DT_NODELABEL(low_ddr))
+	/* Map only the first 32 MiB (NAND readback). A ~2 GiB map is unsafe
+	 * with CONFIG_MAX_XLAT_TABLES=16 and is not needed for the sample.
+	 */
+	MMU_REGION_FLAT_ENTRY("LOW_DDR",
+			      DT_REG_ADDR(DT_NODELABEL(low_ddr)),
+			      0x2000000, /* 32 MiB mapped window */
+			      MT_NORMAL_NC | MT_P_RW_U_RW | MT_DEFAULT_SECURE_STATE),
 #endif
 };
 

@@ -10,10 +10,11 @@
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
 
 #define NAND_INT_SEM_TAKE(param_ptr)						\
 		COND_CODE_1(IS_ENABLED(CONFIG_CDNS_NAND_INTERRUPT_SUPPORT),     \
-		(k_sem_take(&(param_ptr->interrupt_sem_t), K_FOREVER)), ())
+		(k_sem_take(&(param_ptr->interrupt_sem_t), K_SECONDS(10))), ())
 
 #define CNF_GET_INIT_COMP(x)				(FIELD_GET(BIT(9), x))
 #define CNF_GET_INIT_FAIL(x)				(FIELD_GET(BIT(10), x))
@@ -37,7 +38,25 @@
 #define CNF_CTRLPARAM_DEV_FEATUERS			(0x818)
 #define CNF_CTRLPARAM_DEV_BLOCKS_PLUN		        (0x81C)
 #define CNF_CTRLPARAM_ONFI_TIMING_0			(0x824)
+#define CNF_CTRLPARAM_BCH_CFG0				(0x838)
+#define CNF_CTRLPARAM_BCH_CFG1				(0x83C)
+#define CNF_CTRLPARAM_BCH_CFG2				(0x840)
+#define CNF_CTRLPARAM_BCH_CFG3				(0x844)
 #define CNF_CTRLPARAM(_base, _reg)			(_base + (CNF_CTRLPARAM_##_reg))
+
+/* BCH engine identification (same layout as U-Boot cadence-nand.h) */
+#define CNF_BCH_MAX_CORR_CAPS				(8U)
+#define CNF_BCH_CFG0_CORR_CAP_0				GENMASK(7, 0)
+#define CNF_BCH_CFG0_CORR_CAP_1				GENMASK(15, 8)
+#define CNF_BCH_CFG0_CORR_CAP_2				GENMASK(23, 16)
+#define CNF_BCH_CFG0_CORR_CAP_3				GENMASK(31, 24)
+#define CNF_BCH_CFG1_CORR_CAP_4				GENMASK(7, 0)
+#define CNF_BCH_CFG1_CORR_CAP_5				GENMASK(15, 8)
+#define CNF_BCH_CFG1_CORR_CAP_6				GENMASK(23, 16)
+#define CNF_BCH_CFG1_CORR_CAP_7				GENMASK(31, 24)
+#define CNF_BCH_CFG2_SECT_0				GENMASK(15, 0)
+#define CNF_BCH_CFG2_SECT_1				GENMASK(31, 16)
+#define CNF_BCH_CFG3_METADATA_SIZE			GENMASK(23, 16)
 
 #define CNF_CMDREG_CTRL_STATUS				(0x118)
 #define CNF_CMDREG(_base, _reg)				(_base + (CNF_CMDREG_##_reg))
@@ -78,6 +97,41 @@
 
 #define CNF_CTRLCFG(_base, _reg)			(_base + (CNF_CTRLCFG_##_reg))
 
+/*
+ * Transfer / ECC / skip settings — ATF-compatible naming and packing
+ * (arm-trusted-firmware cdns_nand.h) so Zephyr programs the same register
+ * layout and does not fight ATF’s prior configuration when geometry matches.
+ */
+#define CNF_ECC_EN					BIT(0)
+#define CNF_ECC_ERASE_DET_EN				BIT(1)
+#define CNF_ECC_CORR_STR_MASK				GENMASK(10, 8)
+#define CNF_ECC_CORR_STR				(0x02)
+#define CNF_ECC_CFG0_VAL							\
+	((CNF_ECC_EN) | (CNF_ECC_ERASE_DET_EN) |				\
+	 (FIELD_PREP(CNF_ECC_CORR_STR_MASK, CNF_ECC_CORR_STR)))
+#define CNF_ECC_CFG1_VAL				(0x20)
+
+#define CNF_SECTOR_CNT					(0x04)
+#define CNF_SECTOR_OFFSET_MASK				GENMASK(31, 16)
+#define CNF_SECTOR_OFFSET				(0x00)
+#define CNF_TRANS_CFG0_VAL							\
+	((CNF_SECTOR_CNT) |							\
+	 (FIELD_PREP(CNF_SECTOR_OFFSET_MASK, CNF_SECTOR_OFFSET)))
+
+#define CNF_SECTOR_SIZE					(0x0800)
+#define CNF_LAST_SECTOR_MASK				GENMASK(31, 16)
+#define CNF_LAST_SECTOR_SIZE				(0x0828)
+#define CNF_TRANS_CFG1_VAL							\
+	((CNF_SECTOR_SIZE) |							\
+	 (FIELD_PREP(CNF_LAST_SECTOR_MASK, CNF_LAST_SECTOR_SIZE)))
+
+#define CNF_NSKIP_BYTES					(0x02)
+#define CNF_MARKER_VAL					(0xFFFF)
+#define CNF_MARKER_MASK					GENMASK(31, 16)
+#define CNF_SKIP_BYTES_CFG_VAL							\
+	((CNF_NSKIP_BYTES) | (FIELD_PREP(CNF_MARKER_MASK, CNF_MARKER_VAL)))
+#define CNF_SKIP_BYTES_OFFSET_VAL			(0x00002000)
+
 /* Data integrity registers */
 #define CNF_DI_PAR_EN					(0)
 #define CNF_DI_CRC_EN					(1)
@@ -103,6 +157,8 @@
 
 /* Interrupt register field offsets */
 #define INTERRUPT_STATUS_REG				(0x0114)
+#define THREAD_INTERRUPT_ERROR				(0x0128)
+#define THREAD_INTERRUPT_ERROR_ENABLE			(0x0130)
 #define THREAD_INTERRUPT_STATUS				(0x0138)
 
 /* Mini controller DLL PHY controller register field offsets */
@@ -119,6 +175,9 @@
 #define CNF_MINICTRL_TOGGLE_TIMINGS1			(0x1018)
 #define CNF_MINICTRL_ASYNC_TOGGLE_TIMINGS		(0x101C)
 #define CNF_MINICTRL_SYNC_TIMINGS			(0x1020)
+#define CNF_MINICTRL_TIMINGS0				(0x1024)
+#define CNF_MINICTRL_TIMINGS1				(0x1028)
+#define CNF_MINICTRL_TIMINGS2				(0x102C)
 #define CNF_MINICTRL_DLL_PHY_CTRL			(0x1034)
 
 #define CNF_MINICTRL(_base, _reg)			(_base + (CNF_MINICTRL_##_reg))
@@ -138,6 +197,7 @@
 /* Interrupt status register. */
 #define INTR_STATUS					(0x0110)
 #define GINTR_ENABLE					(31)
+#define CMD_ETE_INTR_ENABLE				(17)
 #define INTERRUPT_DISABLE				(0)
 #define INTERRUPT_ENABLE				(1)
 
@@ -238,14 +298,50 @@
 #define PHY_DQS_TIMING_REG_OFFSET			(0x00002004)
 #define PHY_GATE_LPBK_OFFSET				(0x00002008)
 #define PHY_DLL_MASTER_OFFSET				(0x0000200c)
+#define PHY_DLL_SLAVE_OFFSET				(0x00002010)
 #define PHY_CTRL_REG_OFFSET				(0x00002080)
 #define PHY_TSEL_REG_OFFSET				(0x00002084)
+
+/* Timing register fields (U-Boot cadence-nand.h) */
+#define CNF_ASYNC_TOGGLE_TRH				GENMASK(28, 24)
+#define CNF_ASYNC_TOGGLE_TRP				GENMASK(20, 16)
+#define CNF_ASYNC_TOGGLE_TWH				GENMASK(12, 8)
+#define CNF_ASYNC_TOGGLE_TWP				GENMASK(4, 0)
+#define CNF_TIMINGS0_TADL				GENMASK(31, 24)
+#define CNF_TIMINGS0_TCCS				GENMASK(23, 16)
+#define CNF_TIMINGS0_TWHR				GENMASK(15, 8)
+#define CNF_TIMINGS0_TRHW				GENMASK(7, 0)
+#define CNF_TIMINGS1_TRHZ				GENMASK(31, 24)
+#define CNF_TIMINGS1_TWB				GENMASK(23, 16)
+#define CNF_TIMINGS1_TVDLY				GENMASK(7, 0)
+#define CNF_TIMINGS2_TFEAT				GENMASK(25, 16)
+#define CNF_TIMINGS2_CS_HOLD				GENMASK(13, 8)
+#define CNF_TIMINGS2_CS_SETUP				GENMASK(5, 0)
+#define CNF_DLL_PHY_CTRL_DLL_RST_N			BIT(24)
+#define CNF_DLL_PHY_CTRL_EXT_WR				BIT(17)
+#define CNF_DLL_PHY_CTRL_EXT_RD				BIT(16)
+#define CNF_DLL_PHY_CTRL_RS_HIGH_WAIT			GENMASK(11, 8)
+#define CNF_DLL_PHY_CTRL_RS_IDLE			GENMASK(7, 0)
+#define CNF_PHY_DQS_SEL_OE_END				GENMASK(3, 0)
+#define CNF_PHY_DQS_PHONY_DQS_SEL			BIT(16)
+#define CNF_PHY_DQS_USE_PHONY_DQS			BIT(20)
+#define CNF_PHY_GATE_LPBK_RDS				GENMASK(24, 19)
+#define CNF_PHY_CTRL_SDR_DQS				BIT(14)
+#define CNF_PHY_CTRL_PHONY_DQS				GENMASK(9, 4)
+#define CNF_PHY_DLL_MASTER_BYPASS			BIT(23)
+
+#define CNF_HW_NVDDR_SUPPORT(x)				\
+	((FIELD_GET(BIT(28), (x)) != 0U) || (FIELD_GET(BIT(27), (x)) != 0U))
+
+/* Defaults match U-Boot Agilex5 (cdns,board-delay-ps / nf clock) */
+#define CNF_DEFAULT_BOARD_DELAY_PS			(4830U)
+#define CNF_DEFAULT_NF_CLK_RATE_HZ			(100000000U)
 
 #define PHY_CTRL_REG_SDR				(0x00004040)
 #define PHY_TSEL_REG_SDR				(0x00000000)
 #define PHY_DQ_TIMING_REG_SDR				(0x00000002)
 #define PHY_DQS_TIMING_REG_SDR				(0x00100004)
-#define PHY_GATE_LPBK_CTRL_REG_SDR			(0x00D80000)
+#define PHY_GATE_LPBK_CTRL_REG_SDR			(0x00380000)
 #define PHY_DLL_MASTER_CTRL_REG_SDR			(0x00800000)
 #define PHY_DLL_SLAVE_CTRL_REG_SDR			(0x00000000)
 
@@ -330,6 +426,13 @@ struct cdns_cdma_command_descriptor {
 
 } __aligned(64);
 
+#define CDNS_NAND_DMA_ALIGN 64
+
+#if CONFIG_CDNS_NAND_CDMA_MODE
+#define CDNS_NAND_CDMA_DESC_MAX                                                            \
+	MAX(CONFIG_FLASH_CDNS_CDMA_PAGE_COUNT, CONFIG_FLASH_CDNS_CDMA_BLOCK_COUNT)
+#endif
+
 /* Row Address */
 union row_address {
 	struct {
@@ -358,10 +461,19 @@ struct cadence_nand_params {
 	uint8_t lun_size_bit;
 	size_t page_count;
 	unsigned long long device_size;
+	/* NF clock (Hz) and board delay (ps) for cadence_setup_data_interface */
+	uint32_t nf_clk_rate;
+	uint32_t board_delay_ps;
 #ifdef CONFIG_CDNS_NAND_INTERRUPT_SUPPORT
 	struct k_sem interrupt_sem_t;
 #endif
-} __aligned(32);
+	/* Per-device cache-aligned DMA working buffers */
+	uint8_t page_buf[CONFIG_FLASH_CDNS_NAND_PAGE_BUF_SIZE] __aligned(CDNS_NAND_DMA_ALIGN);
+#if CONFIG_CDNS_NAND_CDMA_MODE
+	struct cdns_cdma_command_descriptor cdma_desc[CDNS_NAND_CDMA_DESC_MAX]
+		__aligned(CDNS_NAND_DMA_ALIGN);
+#endif
+} __aligned(CDNS_NAND_DMA_ALIGN);
 
 /* Global function Api */
 int cdns_nand_init(struct cadence_nand_params *params);

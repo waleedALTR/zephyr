@@ -15,6 +15,34 @@ config SHELL_DYNAMIC_CMDS
 	bool "Shell dynamic commands example"
 	default y
 
+choice SHELL_MODULE_STORAGE
+	prompt "Storage backend"
+	default SHELL_MODULE_STORAGE_NAND if DT_HAS_CDNS_NAND_ENABLED
+	default SHELL_MODULE_STORAGE_SDMMC
+	help
+	  Prefer NAND when Cadence NAND is enabled in DT; otherwise enable
+	  the SDMMC disk and filesystem shell stack.
+
+config SHELL_MODULE_STORAGE_NAND
+	bool "NAND flash"
+	help
+	  Use Cadence NAND. Leaves SDMMC / FAT FS shell options disabled
+	  so they do not conflict with NAND bring-up.
+
+config SHELL_MODULE_STORAGE_SDMMC
+	bool "SDMMC"
+	select DISK_ACCESS
+	select SDHC
+	select DISK_DRIVER_SDMMC
+	select FILE_SYSTEM
+	select FAT_FILESYSTEM_ELM
+	select FILE_SYSTEM_SHELL
+	select FILE_SYSTEM_SHELL_MOUNT_COMMAND
+	help
+	  Enable SDMMC disk access and the FAT filesystem shell.
+
+endchoice
+
 endmenu
 
 source "Kconfig.zephyr"

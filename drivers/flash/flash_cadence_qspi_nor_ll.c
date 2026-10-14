@@ -1129,6 +1129,12 @@ int cad_qspi_read_bank_using_interrupt(struct cad_qspi_params *cad_params, uint8
 
 	/* Store the calling parameter */
 	read_req = k_malloc(sizeof(struct transfer_params));
+	if (read_req == NULL) {
+		LOG_ERR("Failed to allocate read request\n");
+		cad_qspi_disable_interrupt_mask(cad_params,
+						CAD_QSPI_INDOPDONE | CAD_QSPI_INDXFRLVL);
+		return -ENOMEM;
+	}
 	read_req->requested_bytes = size;
 	read_req->transferred_bytes = 0;
 	read_req->offset = offset;
@@ -1177,7 +1183,7 @@ int cad_qspi_read_bank_using_interrupt(struct cad_qspi_params *cad_params, uint8
 	/* Disable RX interrupt */
 	cad_qspi_disable_interrupt_mask(cad_params, CAD_QSPI_INDOPDONE | CAD_QSPI_INDXFRLVL |
 					0x1000);
-	free(read_req);
+	k_free(read_req);
 
 	return 0;
 }
@@ -1246,6 +1252,10 @@ int cad_qspi_indirect_page_bound_write_using_interrupt(struct cad_qspi_params *c
 
 	/* Store the calling parameter */
 	write_req = k_malloc(sizeof(struct transfer_params));
+	if (write_req == NULL) {
+		LOG_ERR("Failed to allocate write request\n");
+		return -ENOMEM;
+	}
 	write_req->requested_bytes = len;
 	write_req->transferred_bytes = 0;
 	write_req->offset = offset;
@@ -1282,7 +1292,7 @@ int cad_qspi_indirect_page_bound_write_using_interrupt(struct cad_qspi_params *c
 					       CAD_QSPI_INDXFRLVL);
 		k_sem_take(&cad_params->qspi_intr_sem, K_FOREVER);
 	}
-	free(write_req);
+	k_free(write_req);
 
 	return cad_qspi_indirect_write_finish(cad_params);
 }

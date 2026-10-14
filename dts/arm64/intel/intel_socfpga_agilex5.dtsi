@@ -109,13 +109,19 @@
 		zephyr,memory-region = "MBOX_DDR";
 	};
 
-	fpga_config: fpga@80900000 {
-	/* Reserve Memory For FPGA Config */
-		compatible = "zephyr,memory-region";
-		device_type = "memory";
-		reg = <0x80900000 DT_SIZE_M(16)>;
-		zephyr,memory-region = "FPGA_RESERVED";
-		status = "okay";
+	/*
+	 * fpga_config: general-purpose DDR buffer (4 MiB).
+	 * HPS low DDR is 2 GiB @ 0x80000000 .. 0xffffffff (end excl. 0x100000000).
+	 */
+	fpga_config: memory@83000000 {
+		compatible = "mmio-sram";
+		reg = <0x83000000 DT_SIZE_M(4)>; /* 0x83000000 .. 0x83400000 */
+	};
+
+	/* Remainder of HPS low DDR after fpga_config through end of 2 GiB window. */
+	low_ddr: memory@83400000 {
+		compatible = "mmio-sram";
+		reg = <0x83400000 0x7cc00000>; /* 0x83400000 .. 0x100000000 */
 	};
 
 	/* This qspi setting included
@@ -330,8 +336,10 @@
 		interrupts = <GIC_SPI 97 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 		resets = <&reset RSTMGR_NAND_RSTLINE>,
 			 <&reset RSTMGR_SOFTPHY_RSTLINE>;
-		block-size = <0x20000>;
+		block-size = <0x100000>;
 		data-rate-mode = <0>;
+		clock-frequency = <100000000>;
+		cdns,board-delay-ps = <4830>;
 		status = "disabled";
 	};
 
