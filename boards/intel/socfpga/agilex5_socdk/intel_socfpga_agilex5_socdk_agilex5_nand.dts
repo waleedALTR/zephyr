@@ -1,0 +1,71 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/dts-v1/;
+
+#include "intel_socfpga_agilex5_socdk_common.dtsi"
+
+/ {
+	model = "Intel SoC FPGA Agilex5 NAND daughter board";
+	compatible = "intel,socfpga-agilex5-socdk-nand", "intel,socfpga-agilex5";
+
+	aliases {
+		led0 = &led0;
+		led1 = &led1;
+		nand = &nand;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led0: led0 {
+			gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
+		};
+
+		led1: led1 {
+			gpios = <&gpio0 7 GPIO_ACTIVE_HIGH>;
+		};
+	};
+};
+
+&nand {
+	status = "okay";
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		storage_partition: partition@300000 {
+			label = "storage";
+			reg = <0x00300000 0xffd00000>;
+		};
+	};
+};
+
+&xgmac0 {
+	full-duplex-mode-en;
+	num-dma-ch = <1>;
+	num-tx-queues = <1>;
+	num-rx-queues = <1>;
+	num-tc = <1>;
+	dma-ch-rdrl = <128>;
+	dma-ch-tdrl = <128>;
+	max-speed = <1000>;
+	max-frame-size = <9018>;
+	jumbo-pkt-en;
+	zephyr,random-mac-address;
+	phy-handle = <&phy0>;
+};
+
+&mdio0 {
+	csr-clock-indx = <4>;
+
+	phy0: phy@0 {
+		compatible = "ethernet-phy";
+		reg = <0>;
+	};
+};

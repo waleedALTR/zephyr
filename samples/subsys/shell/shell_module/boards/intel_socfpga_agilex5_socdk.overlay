@@ -4,71 +4,16 @@
  */
  
 
-/ {
-	aliases {
-		nand = &nand;
-	};
-};
-
-&nand {
-	status = "okay";
-};
-
 &xgmac2 {
-	status = "disabled";
+	status = "okay";
 };
 
 &mdio2 {
-	status = "disabled";
+	status = "okay";
 };
 
 &phy0 {
-	status = "disabled";
-};
-
-&xgmac0 {
 	status = "okay";
-	full-duplex-mode-en;
-	num-dma-ch = <1>;
-	num-tx-queues = <1>;
-	num-rx-queues = <1>;
-	num-tc = <1>;
-	dma-ch-rdrl = <128>;
-	dma-ch-tdrl = <128>;
-	max-speed = <1000>;
-	max-frame-size = <9018>;
-	jumbo-pkt-en;
-	local-mac-address = [06 00 00 00 00 01];
-	phy-handle = <&phy_emac0>;
-};
-
-&mdio0 {
-	status = "okay";
-	csr-clock-indx = <4>;
-
-	phy_emac0: phy@0 {
-		compatible = "ethernet-phy";
-		reg = <0>;
-		status = "okay";
-	};
-};
-
-&qspi {
-	status = "okay";
-};
-
-/* Disabled while NAND is selected; re-enable with
- * CONFIG_SHELL_MODULE_STORAGE_SDMMC=y and status = "okay".
- */
-&sdmmc {
-	status = "disabled";
-
-	mmc {
-		/*SD Disk Access */
-		compatible = "zephyr,sdmmc-disk";
-		disk-name = "SD";
-		status = "disabled";
-	};
 };
 
 &timer0 {
@@ -154,4 +99,45 @@
 
 &i2c4 {
 	status = "okay";
+};
+
+&dma1 {
+	status = "okay";
+};
+
+&sip_smc {
+	status = "okay";
+	zephyr,num-clients = <5>;
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&i3c0 {
+	status = "disabled";
+
+	lps22hh0: lps22hh@FB1122330001 {
+		compatible = "st,lps22hh";
+		reg = <0x00 0xFB11 0x22330001>;
+		odr = <1>;
+		status = "disabled";
+	};
+
+	lps22hh1: lps22hh@FB1122330002 {
+		compatible = "st,lps22hh";
+		reg = <0x00 0xFB11 0x22330002>;
+		odr = <1>;
+		status = "disabled";
+	};
+
+	lps22hh2: lps22hh@500000000000000050 { /* i2c device */
+		compatible = "st,lps22hh";
+		reg = <0x50 0x0 0x50>;
+		status = "disabled";
+	};
 };

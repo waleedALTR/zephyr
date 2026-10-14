@@ -1,4 +1,4 @@
-.. _intel_socfpga_agilex5_socdk:
+.. zephyr:board:: intel_socfpga_agilex5_socdk
 
 Intel® Agilex™ 5 SoC FPGA Development Kit
 #########################################
@@ -21,31 +21,26 @@ The Intel® Agilex™ 5 Development Kit supports the following physical features
   multi-core ARM processors of Dual-core A55 and Dual-core A76
 - On-board 8 GB DDR5 memory
 - On-board JTAG Intel FPGA Download Cable II
-- QSPI flash daughtercard
+
+Board Variants
+==============
+
+The board variants follow the Linux device trees for the same hardware:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Board target
+     - Hardware
+   * - ``intel_socfpga_agilex5_socdk``
+     - Development kit with the QSPI daughter board (``socfpga_agilex5_socdk``)
+   * - ``intel_socfpga_agilex5_socdk/agilex5/nand``
+     - Development kit with the NAND daughter board (``socfpga_agilex5_socdk_nand``)
 
 Supported Features
 ==================
-The Intel® Agilex™ 5 SoC Development Kit configuration supports the following
-hardware features:
 
-+-----------+------------+---------------------------------------------+
-| Interface | Controller | Hardware Subsystem Vendor                   |
-+===========+============+=============================================+
-| GIC-600   | on-chip    | ARM GICv3 interrupt controller              |
-+-----------+------------+---------------------------------------------+
-| UART      | on-chip    | Synopsys Designware,NS16550 compatible      |
-+-----------+------------+---------------------------------------------+
-| ARM TIMER | on-chip    | ARM system timer                            |
-+-----------+------------+---------------------------------------------+
-| Reset     | on-chip    | Intel Corporation, SoCFPGA Reset controller |
-+-----------+------------+---------------------------------------------+
-| Clock     | on-chip    | Intel Corporation, SoCFPGA Clock controller |
-+-----------+------------+---------------------------------------------+
-
-NOTE: TODO, more details on dev kit will be updated as and when available.
-
-The default configuration can be found in the defconfig file:
-:zephyr_file:`boards/intel/socfpga/agilex5_socdk/intel_socfpga_agilex5_socdk_defconfig`.
+.. zephyr:board-supported-hw::
 
 Programming and Debugging
 *************************
