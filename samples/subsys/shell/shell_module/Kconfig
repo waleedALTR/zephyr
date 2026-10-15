@@ -45,4 +45,14 @@ endchoice
 
 endmenu
 
+if SHELL_MODULE_STORAGE_NAND
+config FS_FATFS_CUSTOM_MOUNT_POINT_COUNT
+	int
+	default 1
+
+config FS_FATFS_CUSTOM_MOUNT_POINTS
+	string
+	default "SD"
+endif
+
 source "Kconfig.zephyr"
