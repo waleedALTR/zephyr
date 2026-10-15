@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <zephyr/cache.h>
 #include <zephyr/shell/shell.h>
 #include <zephyr/init.h>
 #include <zephyr/fs/fs.h>
@@ -453,6 +454,97 @@ static int cmd_read(const struct shell *sh, size_t argc, char **argv)
 
 	fs_close(&file);
 
+	return 0;
+}
+
+/*
+ * Load a file into a destination memory address
+ * Size is optional; when omitted the full file size from fs_stat() is used.
+ *
+ * Usage: fs load <path> <dst_addr> [size]
+ */
+static int cmd_load(const struct shell *sh, size_t argc, char **argv)
+{
+	char path[MAX_PATH_LEN];
+	struct fs_dirent dirent;
+	struct fs_file_t file;
+	char *endptr;
+	uintptr_t dst;
+	size_t to_load;
+	size_t total = 0;
+	int err;
+
+	create_abs_path(argv[1], path, sizeof(path));
+
+	dst = (uintptr_t)strtoul(argv[2], &endptr, 0);
+	if (*endptr != '\0' || dst == 0U) {
+		shell_error(sh, "Invalid destination address '%s'", argv[2]);
+		return -EINVAL;
+	}
+
+	err = fs_stat(path, &dirent);
+	if (err != 0) {
+		shell_error(sh, "Failed to obtain file %s (err: %d)", path, err);
+		return err;
+	}
+
+	if (dirent.type != FS_DIR_ENTRY_FILE) {
+		shell_error(sh, "Not a file %s", path);
+		return -EINVAL;
+	}
+
+	if (argc > 3) {
+		to_load = (size_t)strtoul(argv[3], &endptr, 0);
+		if (*endptr != '\0' || to_load == 0U) {
+			shell_error(sh, "Invalid size '%s'", argv[3]);
+			return -EINVAL;
+		}
+		if (to_load > dirent.size) {
+			shell_error(sh, "size %zu exceeds file size %zu", to_load, dirent.size);
+			return -EFBIG;
+		}
+	} else {
+		to_load = dirent.size;
+	}
+
+	if (to_load == 0U) {
+		shell_error(sh, "File %s is empty", path);
+		return -EINVAL;
+	}
+
+	fs_file_t_init(&file);
+	err = fs_open(&file, path, FS_O_READ);
+	if (err != 0) {
+		shell_error(sh, "Failed to open %s (%d)", path, err);
+		return err;
+	}
+
+	shell_print(sh, "Loading %zu bytes from %s -> 0x%lx ...", to_load, path,
+		    (unsigned long)dst);
+
+	while (total < to_load) {
+		ssize_t n = fs_read(&file, (void *)(dst + total),
+				    MIN((size_t)BUF_CNT, to_load - total));
+
+		if (n < 0) {
+			shell_error(sh, "read failed at offset %zu (%zd)", total, n);
+			fs_close(&file);
+			return (int)n;
+		}
+		if (n == 0) {
+			shell_error(sh, "unexpected EOF at offset %zu", total);
+			fs_close(&file);
+			return -EIO;
+		}
+		total += (size_t)n;
+	}
+
+	fs_close(&file);
+
+	sys_cache_data_flush_range((void *)dst, total);
+
+	shell_print(sh, "Loaded %zu bytes to 0x%lx (file size %zu)", total, (unsigned long)dst,
+		    dirent.size);
 	return 0;
 }
 
@@ -923,6 +1015,11 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_fs,
 #endif
 	SHELL_CMD(pwd, NULL, "Print current working directory", cmd_pwd),
 	SHELL_CMD_ARG(read, NULL, "Read from file", cmd_read, 2, 255),
+	SHELL_CMD_ARG(load, NULL,
+		      "Load file into memory <path> <dst_addr> [size]\n"
+		      "Omit size to load the whole file (size from fs_stat).\n"
+		      "Example: fs load /SD:/baseline.core.rbf 0x83000000",
+		      cmd_load, 3, 1),
 	SHELL_CMD_ARG(cat, NULL,
 		"Concatenate files and print on the standard output",
 		cmd_cat, 2, 255),
