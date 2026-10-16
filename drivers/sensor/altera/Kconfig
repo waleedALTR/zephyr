@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+# zephyr-keep-sorted-start
+source "drivers/sensor/altera/sdm_hwmon/Kconfig"
+# zephyr-keep-sorted-stop

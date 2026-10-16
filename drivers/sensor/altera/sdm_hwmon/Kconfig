@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+config ALTERA_SDM_HWMON
+	bool "Altera SoC FPGA SDM hardware monitor"
+	default y
+	depends on DT_HAS_ALTR_SOCFPGA_SDM_HWMON_ENABLED
+	depends on ALTERA_SDM
+	help
+	  Enable the driver for the voltage and temperature sensors of the
+	  Secure Device Manager (SDM) of Altera SoC FPGAs, read through the SDM
+	  mailbox.

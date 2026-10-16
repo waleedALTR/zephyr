@@ -253,6 +253,11 @@
 		sdm: sdm {
 			compatible = "altr,socfpga-sdm";
 			status = "disabled";
+
+			sdm_hwmon: hwmon {
+				compatible = "altr,socfpga-sdm-hwmon";
+				status = "disabled";
+			};
 		};
 	};
 

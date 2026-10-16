@@ -20,6 +20,8 @@
 
 	aliases {
 		led0 = &led0;
+		volt-sensor0 = &sdm_hwmon;
+		die-temp0 = &sdm_hwmon;
 	};
 
 	leds {
@@ -69,6 +71,11 @@
 
 &sdm {
 	status = "okay";
+};
+
+&sdm_hwmon {
+	status = "okay";
+	voltage-channel = <4>;
 };
 
 &uart0 {

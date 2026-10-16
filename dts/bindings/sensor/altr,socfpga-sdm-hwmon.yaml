@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Hardware monitor of the Secure Device Manager (SDM) of Altera SoC FPGAs.
+
+  The voltage is read with the SDM mailbox GET_VOLTAGE command and exposed
+  as SENSOR_CHAN_VOLTAGE. The temperature is read with the GET_TEMPERATURE
+  command and exposed as SENSOR_CHAN_DIE_TEMP. The monitor has no interface
+  of its own, so it is modelled as a child of the altr,socfpga-sdm node.
+
+  Example:
+
+    &sdm {
+            status = "okay";
+
+            hwmon {
+                    compatible = "altr,socfpga-sdm-hwmon";
+                    voltage-channel = <2>;
+                    temperature-location = <0>;
+                    temperature-channel = <0>;
+            };
+    };
+
+compatible: "altr,socfpga-sdm-hwmon"
+
+include: sensor-device.yaml
+
+properties:
+  voltage-channel:
+    type: int
+    description: |
+      SDM voltage channel number, 0 to 15. The channel to rail mapping is
+      device specific; see the SDM mailbox documentation of the SoC. Without
+      this property SENSOR_CHAN_VOLTAGE is not supported.
+
+  temperature-location:
+    type: int
+    default: 0
+    description: |
+      Temperature sensor location, 0 to 65535, passed in bits 15:0 of the
+      GET_TEMPERATURE argument. The location numbering is device specific;
+      see the SDM mailbox documentation of the SoC.
+
+  temperature-channel:
+    type: int
+    description: |
+      Channel number, 0 to 15, of the sensor at temperature-location, passed
+      as a mask in bits 31:16 of the GET_TEMPERATURE argument. Without this
+      property the mask is zero.
