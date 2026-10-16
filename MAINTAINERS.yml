@@ -309,13 +309,11 @@ ARM SiP SVC:
     - include/zephyr/sip_svc/
     - include/zephyr/drivers/sip_svc/
     - drivers/sip_svc/
-    - samples/subsys/sip_svc/
     - dts/bindings/sip_svc/
   labels:
     - "area: ARM SiP SVC"
   tests:
     - sip_svc
-    - sample.sip_svc
 
 ARM arch:
   status: maintained
