@@ -5,6 +5,6 @@
 
 config ALTERA_AGILEX_BRIDGE_FPGA
 	bool "ALTERA fpga driver"
-	depends on ARM_SIP_SVC_SUBSYS
+	depends on ALTERA_SDM
 	help
 	  Enable ALTERA FPGA driver.

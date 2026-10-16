@@ -11,23 +11,8 @@
 
 /* Mask for FPGA-HPS bridges */
 #define BRIDGE_MASK					0x0F
-/* Mailbox command header index */
-#define MBOX_CMD_HEADER_INDEX       0x00
-/* Mailbox command memory size */
-#define FPGA_MB_CMD_ADDR_MEM_SIZE   20
-/* Mailbox command response memory size */
-#define FPGA_MB_RESPONSE_MEM_SIZE   20
-/* Config status response length */
-#define FPGA_CONFIG_STATUS_RESPONSE_LEN	   0x07
-
-#define MBOX_CMD_CODE_OFFSET 0x00
-#define MBOX_CMD_ID_MASK     0x7FF
-
-#define MBOX_CMD_MODE_OFFSET 0x0B
-#define MBOX_CMD_MODE_MASK   0x800
-
-#define MBOX_DATA_LEN_OFFSET 0x0C
-#define MBOX_DATA_LEN_MASK   0xFFF000
+/* Config status response buffer length, header included */
+#define FPGA_CONFIG_STATUS_RESPONSE_MAX_LEN 16
 
 #define RECONFIG_DIRECT_COUNT_OFFSET 0x00
 #define RECONFIG_DIRECT_COUNT_MASK   0xFF
@@ -59,11 +44,6 @@
 #define RECONFIG_SOFTFUNC_STATUS_INIT_DONE	  BIT(1)
 #define RECONFIG_SOFTFUNC_STATUS_SEU_ERROR	  BIT(3)
 #define RECONFIG_PIN_STATUS_NSTATUS		      BIT(31)
-
-#define MBOX_REQUEST_HEADER(cmd_id, cmd_mode, len)                                                 \
-	((cmd_id << MBOX_CMD_CODE_OFFSET) & (MBOX_CMD_ID_MASK)) |                                  \
-		((cmd_mode << MBOX_CMD_MODE_OFFSET) & (MBOX_CMD_MODE_MASK)) |                      \
-		((len << MBOX_DATA_LEN_OFFSET) & (MBOX_DATA_LEN_MASK))
 
 #define MBOX_RECONFIG_REQUEST_DATA_FORMAT(direct_count, indirect_arg_count, response_arg_count)    \
 	((direct_count << RECONFIG_DIRECT_COUNT_OFFSET) & (RECONFIG_DIRECT_COUNT_MASK)) |          \
@@ -184,22 +164,6 @@ enum mbox_reconfig_status_resp {
 	MBOX_RECONFIG_STATUS_ERROR_LOCATION,
 	/* Mailbox reconfig status error details */
 	MBOX_RECONFIG_STATUS_ERROR_DETAILS
-};
-
-enum smc_request {
-	/* SMC request parameter a2 index*/
-	SMC_REQUEST_A2_INDEX = 0x00,
-	/* SMC request parameter a3 index */
-	SMC_REQUEST_A3_INDEX = 0x01
-};
-
-/* SIP SVC response private data */
-struct sip_svc_private_data {
-	struct sip_svc_response response;
-	uint32_t *mbox_response_data;
-	uint32_t mbox_response_len;
-	struct k_sem smc_sem;
-	struct fpga_config_status config_status;
 };
 
 #endif

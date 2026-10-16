@@ -933,6 +933,24 @@ Flash
   of determining flash bank sizes using ``reg`` size cells. No changes need be made to the
   devicetree save for removing the aforementioned property. (:github:`114971`)
 
+FPGA
+====
+
+* The Altera Agilex FPGA bridge driver (``altr,socfpga-agilex-bridge``) reaches the Secure Device
+  Manager through the :dtcompatible:`altr,socfpga-sdm` driver instead of registering its own ARM
+  SiP service client. Applications using the bridge must enable the ``sdm`` node in addition to
+  the ``sip_smc`` node:
+
+  .. code-block:: devicetree
+
+     &sip_smc {
+             status = "okay";
+     };
+
+     &sdm {
+             status = "okay";
+     };
+
 Fuel Gauge
 ==========
 
