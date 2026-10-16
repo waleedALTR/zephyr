@@ -73,4 +73,13 @@ config ARM_SIP_SVC_SUBSYS_SHELL
 	  Enable ARM SiP SVC service shell support to communicate with EL3/EL2
 	  layers using SMC/HVC calls.
 
+config HEAP_MEM_POOL_ADD_SIZE_ARM_SIP_SVC_SUBSYS
+	int
+	default 8192
+	help
+	  The controllers allocate their asynchronous response buffer, request
+	  queue, clients and transaction ID pools from the system heap. The
+	  default covers one controller with a 4 KiB response buffer and the
+	  default client and transaction counts.
+
 endif
