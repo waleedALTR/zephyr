@@ -63,7 +63,12 @@
 };
 
 &sip_smc {
+	status = "okay";
 	shared-memory = <&mbox_shm>;
+};
+
+&sdm {
+	status = "okay";
 };
 
 &uart0 {

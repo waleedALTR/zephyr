@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # zephyr-keep-sorted-start
+add_subdirectory_ifdef(CONFIG_ALTERA_SDM altera_sdm)
 add_subdirectory_ifdef(CONFIG_ARM_SCMI scmi)
 add_subdirectory_ifdef(CONFIG_QEMU_FWCFG qemu_fwcfg)
 add_subdirectory_ifdef(CONFIG_RASPBERRYPI_FIRMWARE rpi_fw)

@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Secure Device Manager (SDM) of Altera SoC FPGAs.
+
+  The SDM is reached through its mailbox, which EL3 firmware exposes as SiP
+  service calls. The node is a child of the SiP service controller node and
+  is the parent of the devices whose only interface is the SDM mailbox.
+
+  Example:
+
+    &sip_smc {
+            status = "okay";
+
+            sdm: sdm {
+                    compatible = "altr,socfpga-sdm";
+                    status = "okay";
+            };
+    };
+
+compatible: "altr,socfpga-sdm"
+
+include: base.yaml

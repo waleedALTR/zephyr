@@ -249,6 +249,11 @@
 		method = "smc";
 		status = "disabled";
 		zephyr,num-clients = <2>;
+
+		sdm: sdm {
+			compatible = "altr,socfpga-sdm";
+			status = "disabled";
+		};
 	};
 
 	/* cadence Nand Flash controller*/

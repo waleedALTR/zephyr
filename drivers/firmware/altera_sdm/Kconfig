@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+config ALTERA_SDM
+	bool "Altera SoC FPGA Secure Device Manager"
+	default y
+	depends on DT_HAS_ALTR_SOCFPGA_SDM_ENABLED
+	depends on ARM_SIP_SVC_SUBSYS
+	depends on ARM_SIP_SVC_HAS_INTEL_SDM_MAILBOX_FIFO
+	help
+	  Driver for the mailbox of the Secure Device Manager (SDM) of Altera
+	  SoC FPGAs, reached through the ARM SiP service. Drivers of devices
+	  behind the SDM send mailbox commands through it.
+
+if ALTERA_SDM
+
+config ALTERA_SDM_INIT_PRIORITY
+	int "Altera SDM init priority"
+	default 60
+	help
+	  Must be higher (later) than CONFIG_ARM_SIP_SVC_SUBSYS_INIT_PRIORITY,
+	  so the SiP service controller is ready when the driver registers
+	  its client.
+
+config ALTERA_SDM_TIMEOUT_MS
+	int "SDM mailbox timeout in milliseconds"
+	default 1000
+	help
+	  Time to wait for the SiP service client to open and for the SDM to
+	  answer a mailbox command.
+
+config HEAP_MEM_POOL_ADD_SIZE_ALTERA_SDM
+	int
+	default 256
+	help
+	  The SiP service takes ownership of the mailbox command and response
+	  buffers, which are allocated from the system heap.
+
+endif # ALTERA_SDM

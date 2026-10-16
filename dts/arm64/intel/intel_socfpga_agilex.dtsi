@@ -120,6 +120,11 @@
 		method = "smc";
 		status = "disabled";
 		zephyr,num-clients = <2>;
+
+		sdm: sdm {
+			compatible = "altr,socfpga-sdm";
+			status = "disabled";
+		};
 	};
 
 	timer0: timer@ffc03000 {

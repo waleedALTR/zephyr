@@ -11,6 +11,7 @@ config ARM_SCMI
 	  Interface (SCMI).
 
 # zephyr-keep-sorted-start
+source "drivers/firmware/altera_sdm/Kconfig"
 source "drivers/firmware/qemu_fwcfg/Kconfig"
 source "drivers/firmware/rpi_fw/Kconfig"
 source "drivers/firmware/scmi/Kconfig"
