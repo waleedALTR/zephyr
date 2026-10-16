@@ -548,6 +548,73 @@ static int cmd_load(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/*
+ * Store memory contents into a file (DDR / buffer -> filesystem).
+ * Inverse of "fs load".
+ *
+ * Usage: fs store <path> <src_addr> <size>
+ */
+static int cmd_store(const struct shell *sh, size_t argc, char **argv)
+{
+	char path[MAX_PATH_LEN];
+	struct fs_file_t file;
+	char *endptr;
+	uintptr_t src;
+	size_t to_store;
+	size_t total = 0;
+	int err;
+
+	create_abs_path(argv[1], path, sizeof(path));
+
+	src = (uintptr_t)strtoul(argv[2], &endptr, 0);
+	if (*endptr != '\0' || src == 0U) {
+		shell_error(sh, "Invalid source address '%s'", argv[2]);
+		return -EINVAL;
+	}
+
+	to_store = (size_t)strtoul(argv[3], &endptr, 0);
+	if (*endptr != '\0' || to_store == 0U) {
+		shell_error(sh, "Invalid size '%s'", argv[3]);
+		return -EINVAL;
+	}
+
+	/* Ensure CPU sees the latest data from DMA / other masters. */
+	sys_cache_data_invd_range((void *)src, to_store);
+
+	fs_file_t_init(&file);
+	err = fs_open(&file, path, FS_O_CREATE | FS_O_TRUNC | FS_O_WRITE);
+	if (err != 0) {
+		shell_error(sh, "Failed to open %s (%d)", path, err);
+		return err;
+	}
+
+	shell_print(sh, "Storing %zu bytes from 0x%lx -> %s ...", to_store,
+		    (unsigned long)src, path);
+
+	while (total < to_store) {
+		/* Direct from DDR; use a larger chunk than BUF_CNT for bulk blobs. */
+		ssize_t n = fs_write(&file, (const void *)(src + total),
+				     MIN((size_t)4096, to_store - total));
+
+		if (n < 0) {
+			shell_error(sh, "write failed at offset %zu (%zd)", total, n);
+			fs_close(&file);
+			return (int)n;
+		}
+		if (n == 0) {
+			shell_error(sh, "short write at offset %zu", total);
+			fs_close(&file);
+			return -EIO;
+		}
+		total += (size_t)n;
+	}
+
+	fs_close(&file);
+
+	shell_print(sh, "Stored %zu bytes to %s from 0x%lx", total, path, (unsigned long)src);
+	return 0;
+}
+
 static int cmd_cat(const struct shell *sh, size_t argc, char **argv)
 {
 	char path[MAX_PATH_LEN];
@@ -1018,8 +1085,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_fs,
 	SHELL_CMD_ARG(load, NULL,
 		      "Load file into memory <path> <dst_addr> [size]\n"
 		      "Omit size to load the whole file (size from fs_stat).\n"
-		      "Example: fs load /SD:/baseline.core.rbf 0x83000000",
+		      "Example: fs load /NAND:/baseline.core.rbf 0x83000000",
 		      cmd_load, 3, 1),
+	SHELL_CMD_ARG(store, NULL,
+		      "Store memory into a file <path> <src_addr> <size>\n"
+		      "Example: fs store /NAND:/baseline.core.rbf 0x83000000 0x226000",
+		      cmd_store, 4, 0),
 	SHELL_CMD_ARG(cat, NULL,
 		"Concatenate files and print on the standard output",
 		cmd_cat, 2, 255),
