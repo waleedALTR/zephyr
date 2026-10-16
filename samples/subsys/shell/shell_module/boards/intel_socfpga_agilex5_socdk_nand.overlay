@@ -5,12 +5,45 @@
 
 #include "intel_socfpga_agilex5_socdk.overlay"
 
-&sdmmc {
-	status = "disabled";
+/ {
+	aliases {
+		nand = &nand;
+	};
 };
 
-&qspi {
-	status = "disabled";
+/*
+ * Agilex 5 combo PHY is muxed to either NAND or SDMMC.
+ * Enable only one controller. NAND daughter card: PHY selected
+ * for NAND (okay here); leave &sdmmc/mmc disabled.
+ */
+&nand {
+	status = "okay";
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		nand_fip_partition: partition@0 {
+			label = "fip";
+			reg = <0x0 DT_SIZE_M(10)>;
+		};
+
+		nand_storage_partition: partition@a00000 {
+			label = "storage";
+			reg = <0x00a00000 0xff600000>;
+		};
+	};
+};
+
+/ {
+	ftl {
+		compatible = "zephyr,ftl-dhara";
+		partition = <&nand_storage_partition>;
+		disk-name = "NAND";
+		/* Must be >= NAND page size (often 8 KiB or 16 KiB). */
+		buffer-size = <16384>;
+	};
 };
 
 &xgmac2 {
@@ -21,34 +54,52 @@
 	status = "disabled";
 };
 
+&phy0 {
+	status = "okay";
+};
+
 &xgmac0 {
 	status = "okay";
+	full-duplex-mode-en;
+	num-dma-ch = <1>;
+	num-tx-queues = <1>;
+	num-rx-queues = <1>;
+	num-tc = <1>;
+	dma-ch-rdrl = <128>;
+	dma-ch-tdrl = <128>;
+	max-speed = <1000>;
+	max-frame-size = <9018>;
+	jumbo-pkt-en;
+	local-mac-address = [06 00 00 00 00 01];
+	phy-handle = <&phy_emac0>;
 };
 
 &mdio0 {
 	status = "okay";
+	csr-clock-indx = <4>;
+
+	phy_emac0: phy@0 {
+		compatible = "ethernet-phy";
+		reg = <0>;
+		status = "okay";
+	};
 };
 
-&nand {
+&qspi {
 	status = "okay";
 };
 
-&i2c0 {
-	status = "okay";
-};
+/*
+ * Disabled the sdmmc node when combo_phy is selected for the
+ * nand controller.
+ */
+&sdmmc {
+	status = "disabled";
 
-&i2c1 {
-	status = "okay";
-};
-
-&i2c2 {
-	status = "okay";
-};
-
-&i2c3 {
-	status = "okay";
-};
-
-&i2c4 {
-	status = "okay";
+	mmc {
+		/*SD Disk Access */
+		compatible = "zephyr,sdmmc-disk";
+		disk-name = "SD";
+		status = "disabled";
+	};
 };

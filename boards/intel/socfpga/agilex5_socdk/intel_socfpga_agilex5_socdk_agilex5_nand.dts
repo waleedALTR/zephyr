@@ -31,6 +31,22 @@
 	};
 };
 
+&qspi {
+	status = "okay";
+
+	flash0: flash@0 {
+		compatible = "micron,mt25qu02g";
+		reg = <0>;
+		size = <DT_SIZE_M(256*8)>; /* in bits */
+		sector-size = <65536>;
+		subsector-size = <4096>;
+		page-size = <256>;
+		address-byte = <2>;
+		bytes-per-block = <16>;
+		status = "okay";
+	};
+};
+
 &nand {
 	status = "okay";
 
@@ -39,10 +55,25 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		storage_partition: partition@300000 {
-			label = "storage";
-			reg = <0x00300000 0xffd00000>;
+		nand_fip_partition: partition@0 {
+			label = "fip";
+			reg = <0x0 DT_SIZE_M(10)>;
 		};
+
+		nand_storage_partition: partition@a00000 {
+			label = "storage";
+			reg = <0x00a00000 0xff600000>;
+		};
+	};
+};
+
+/ {
+	ftl {
+		compatible = "zephyr,ftl-dhara";
+		partition = <&nand_storage_partition>;
+		disk-name = "NAND";
+		/* Must be >= NAND page size (often 8 KiB or 16 KiB). */
+		buffer-size = <16384>;
 	};
 };
 

@@ -25,9 +25,16 @@ choice SHELL_MODULE_STORAGE
 
 config SHELL_MODULE_STORAGE_NAND
 	bool "NAND flash"
+	select DISK_ACCESS
+	select DISK_DRIVER_FTL if DT_HAS_ZEPHYR_FTL_DHARA_ENABLED && ZEPHYR_DHARA_MODULE
+	select FILE_SYSTEM
+	select FAT_FILESYSTEM_ELM
+	select FILE_SYSTEM_SHELL
+	select FILE_SYSTEM_SHELL_MOUNT_COMMAND
 	help
-	  Use Cadence NAND. Leaves SDMMC / FAT FS shell options disabled
-	  so they do not conflict with NAND bring-up.
+	  Use Cadence NAND with Dhara FTL disk (/NAND:) and the FAT
+	  filesystem shell. Requires zephyr,ftl-dhara in DT and the
+	  dhara west module (west update dhara).
 
 config SHELL_MODULE_STORAGE_SDMMC
 	bool "SDMMC"
@@ -52,7 +59,7 @@ config FS_FATFS_CUSTOM_MOUNT_POINT_COUNT
 
 config FS_FATFS_CUSTOM_MOUNT_POINTS
 	string
-	default "SD"
+	default "NAND"
 endif
 
 source "Kconfig.zephyr"
