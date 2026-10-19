@@ -19,6 +19,7 @@ if(CONFIG_HWINFO_NATIVE)
 endif()
 
 # zephyr-keep-sorted-start
+zephyr_library_sources_ifdef(CONFIG_HWINFO_ALTERA_SDM hwinfo_altera_sdm.c)
 zephyr_library_sources_ifdef(CONFIG_HWINFO_AMBIQ hwinfo_ambiq.c)
 zephyr_library_sources_ifdef(CONFIG_HWINFO_ANDES hwinfo_andes.c)
 zephyr_library_sources_ifdef(CONFIG_HWINFO_BFLB hwinfo_bflb.c)

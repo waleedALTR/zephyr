@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+config HWINFO_ALTERA_SDM
+	bool "Altera SoC FPGA SDM device ID"
+	default y
+	depends on ALTERA_SDM
+	select HWINFO_HAS_DRIVER
+	help
+	  Enable the hwinfo driver reading the 64-bit chip ID of Altera SoC
+	  FPGAs from the Secure Device Manager (SDM) mailbox.

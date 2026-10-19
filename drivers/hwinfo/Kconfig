@@ -26,6 +26,7 @@ config HWINFO_SHELL
 	  Enable hwinfo Shell for testing.
 
 # zephyr-keep-sorted-start
+rsource "Kconfig.altera_sdm"
 rsource "Kconfig.ambiq"
 rsource "Kconfig.andes"
 rsource "Kconfig.bflb"
