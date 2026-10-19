@@ -78,6 +78,10 @@
 	voltage-channel = <4>;
 };
 
+&sdm_rng {
+	status = "okay";
+};
+
 &uart0 {
 	status = "okay";
 	current-speed = <115200>;

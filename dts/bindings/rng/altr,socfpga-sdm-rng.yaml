@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Random number generator of the Secure Device Manager (SDM) of Altera SoC
+  FPGAs.
+
+  The random numbers are read with the SDM mailbox FCS RANDOM_GEN command.
+  The generator has no interface of its own, so it is modelled as a child
+  of the altr,socfpga-sdm node.
+
+  Example:
+
+    &sdm {
+            status = "okay";
+
+            sdm_rng: rng {
+                    compatible = "altr,socfpga-sdm-rng";
+                    status = "okay";
+            };
+    };
+
+compatible: "altr,socfpga-sdm-rng"
+
+include: base.yaml
