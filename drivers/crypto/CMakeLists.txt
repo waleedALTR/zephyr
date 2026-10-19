@@ -4,6 +4,7 @@ zephyr_library()
 zephyr_library_link_libraries_ifdef(CONFIG_MBEDTLS_BUILTIN mbedtls_iface)
 
 # zephyr-keep-sorted-start
+zephyr_library_sources_ifdef(CONFIG_CRYPTO_ALTERA_FCS crypto_altera_fcs.c)
 zephyr_library_sources_ifdef(CONFIG_CRYPTO_ATAES132A crypto_ataes132a.c)
 zephyr_library_sources_ifdef(CONFIG_CRYPTO_BEE_AES crypto_bee_aes.c)
 zephyr_library_sources_ifdef(CONFIG_CRYPTO_BEE_SHA256 crypto_bee_sha.c)

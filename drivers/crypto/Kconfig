@@ -62,6 +62,7 @@ config CRYPTO_MBEDTLS_SHIM_MAX_SESSION
 	  can handle in parallel.
 
 # zephyr-keep-sorted-start
+source "drivers/crypto/Kconfig.altera_fcs"
 source "drivers/crypto/Kconfig.ataes132a"
 source "drivers/crypto/Kconfig.bee"
 source "drivers/crypto/Kconfig.bflb"

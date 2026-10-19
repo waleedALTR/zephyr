@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  FPGA Crypto Service (FCS) of the Secure Device Manager (SDM) of Altera SoC
+  FPGAs.
+
+  The crypto service is reached with SDM mailbox commands. It has no
+  interface of its own, so it is modelled as a child of the
+  altr,socfpga-sdm node.
+
+  Example:
+
+    &sdm {
+            status = "okay";
+
+            sdm_fcs: fcs {
+                    compatible = "altr,socfpga-sdm-fcs";
+                    status = "okay";
+            };
+    };
+
+compatible: "altr,socfpga-sdm-fcs"
+
+include: base.yaml
