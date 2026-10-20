@@ -47,7 +47,7 @@
 	(header) |= (((trans_id)&SMC_PLAT_PROTO_HEADER_TRANS_ID_MASK)                              \
 		     << SMC_PLAT_PROTO_HEADER_TRANS_ID_OFFSET);
 
-/* @brief SYNC SMC Function IDs
+/* @brief SYNC SMC Function IDs (SiP SVC V2)
  */
 
 #define SMC_FUNC_ID_GET_SVC_VERSION 0xC2000400
@@ -57,7 +57,24 @@
 #define SMC_FUNC_ID_SET_HPS_BRIDGES 0xC2000404
 #define SMC_FUNC_ID_RSU_UPDATE_ADDR 0xC2000405
 
-/* @brief ASYNC SMC Function IDs
+/*
+ * V1 FPGA_CONFIG_START — Agilex5 uses this (like U-Boot) so stock BL31
+ * remapper_init() programs AR/AW before Zephyr V2 CANCEL/RECONFIG/DATA.
+ * a1=1 matches U-Boot intel_sdm_mb_load().
+ */
+#define SMC_FUNC_ID_FPGA_CONFIG_START		0xC2000001
+#define SMC_FPGA_CONFIG_FLAG_PARTIAL		(1U << 0)
+
+/*
+ * Agilex5 SDM BE remapper (ATF INTEL_SIP_SMC_FCS_SDM_REMAPPER_CONFIG).
+ * Stock BL31 enable is a no-op; prefer FPGA_CONFIG_START above.
+ * a1=0 enable, a1=1 bypass.
+ */
+#define SMC_FUNC_ID_SDM_REMAPPER_CONFIG		0xC2000201
+#define SMC_SDM_REMAPPER_ENABLE			0U
+#define SMC_SDM_REMAPPER_BYPASS			1U
+
+/* @brief ASYNC SMC Function IDs (SiP SVC V2 raw mailbox)
  */
 
 #define SMC_FUNC_ID_MAILBOX_SEND_COMMAND  0xC2000420

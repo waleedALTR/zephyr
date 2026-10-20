@@ -22,13 +22,12 @@
  * in the MBOX_DDR linker region defined in devicetree.
  */
 
-#if DT_NODE_EXISTS(DT_NODELABEL(mbox_ddr))
+#if !DT_NODE_EXISTS(DT_NODELABEL(mbox_ddr))
+#error "Agilex5 SiP mailbox buffers require DT node mbox_ddr"
+#endif
+
 #define SOCFPGA_MBOX_DDR_BASE	DT_REG_ADDR(DT_NODELABEL(mbox_ddr))
 #define SOCFPGA_MBOX_DDR_SIZE	DT_REG_SIZE(DT_NODELABEL(mbox_ddr))
-#else
-#define SOCFPGA_MBOX_DDR_BASE	0x82000000UL
-#define SOCFPGA_MBOX_DDR_SIZE	0x00010000UL
-#endif
 
 #define SOCFPGA_MBOX_DDR __attribute__((section("MBOX_DDR")))
 

@@ -36,6 +36,8 @@
 #define RECONFIG_DATA_MB_CMD_INDIRECT_RESPONSE 0x00
 #define RECONFIG_STATUS_INTERVAL_DELAY_US      1000
 #define RECONFIG_STATUS_RETRY_COUNT            20
+/* First RECONFIG_DATA chunk must get an async reply; hang = SDM/ATF never responds */
+#define RECONFIG_DATA_CHUNK_TIMEOUT_MS         30000
 
 #define MBOX_CONFIG_STATUS_STATE_CONFIG	  0x10000000
 #define MBOX_CFGSTAT_VAB_BS_PREAUTH       0x20000000
@@ -156,6 +158,8 @@ struct fm_lock_data {
 struct fm_private_data {
 	uint32_t reconfig_data_send_done;
 	uint32_t config_type;
+	/* 1 if malloc'd by send_reconfig_data(); callback must free after sem_give */
+	uint32_t heap_allocated;
 	struct fm_lock_data *private_data_lock;
 	struct fpga_config_status config_status;
 };
@@ -179,16 +183,19 @@ enum smc_cmd_code {
 	/* SMC COMMAND ID to send Reconfig data to SDM via mailbox */
 	FPGA_RECONFIG_DATA = 0x08,
 	/* SMC COMMAND ID to check Reconfig status to SDM via mailbox */
-	FPGA_RECONFIG_STATUS
+	FPGA_RECONFIG_STATUS = 0x09,
+	/* Agilex5: deassert FPGA config-complete / trigger isolation (ATF 0x45) */
+	/* Isolation via ATF FPGA_CONFIG_START; not sent from Zephyr. */
+	FPGA_CONFIG_COMP = 0x45,
 };
 
 enum fpga_config_stages {
 	/* Will init SiP SVC client services  */
 	FPGA_CONFIG_INIT,
-	/* Disable all bridges */
-	FPGA_BRIDGE_DISABLE,
-	/* Freeze fpga region*/
+	/* Freeze fpga region (PARTIAL only) */
 	FPGA_FREEZE_REGION,
+	/* Unused: isolation is done inside ATF FPGA_CONFIG_START */
+	FPGA_CONFIG_COMP_STAGE,
 	/* FPGA cancel stage */
 	FPGA_CANCEL_STAGE,
 	/* Send the Reconfig command*/
@@ -197,11 +204,9 @@ enum fpga_config_stages {
 	FPGA_RECONFIG_DATA_SEND,
 	/* Check the Reconfig status */
 	FPGA_RECONFIG_CHECK_STATUS,
-	/* Enable all bridges after Reconfig success */
-	FPGA_BRIDGE_ENABLE,
-	/* Un-freeze fpga region*/
+	/* Un-freeze fpga region (PARTIAL only) */
 	FPGA_UNFREEZE_REGION,
-	/* Error exit stage */
+	/* Error / success exit stage */
 	FPGA_RECONFIG_EXIT
 };
 

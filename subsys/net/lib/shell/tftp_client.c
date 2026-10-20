@@ -129,14 +129,14 @@ static struct tftp_ddr_shell_ctx *tftp_ddr_active_ctx;
 
 /*
  * HPS low DDR window used for -a validation (Agilex5 only).
- * Restricted sub-ranges (boot / Zephyr / mailbox / fpga_config) are denied below.
+ * Restricted sub-ranges (boot / Zephyr / mailbox) are denied below.
+ * fpga_config (bitstream staging) is intentionally allowed for RBF loads.
  */
 #define TFTP_SHELL_DDR_LOW_BASE  ((uintptr_t)0x80000000ULL)
 #define TFTP_SHELL_DDR_LOW_END   ((uintptr_t)0x100000000ULL)
 
 #define TFTP_SHELL_MEM0_NODE         DT_NODELABEL(mem0)
 #define TFTP_SHELL_MBOX_NODE         DT_NODELABEL(mbox_ddr)
-#define TFTP_SHELL_FPGA_CONFIG_NODE  DT_NODELABEL(fpga_config)
 
 struct tftp_shell_deny_range {
 	uintptr_t base;
@@ -157,7 +157,8 @@ static bool tftp_shell_ranges_overlap(uintptr_t a, size_t a_len, uintptr_t b, si
  *  - FSBL/BL staging below Zephyr RAM
  *  - Zephyr SRAM (mem0)
  *  - TF-A SiP mailbox (mbox_ddr)
- *  - fpga_config buffer
+ *
+ * fpga_config is the intended RBF/bitstream staging buffer and is allowed.
  */
 static int tftp_shell_validate_ddr_dest(const struct shell *sh, uintptr_t addr,
 					size_t *max_inout)
@@ -165,7 +166,7 @@ static int tftp_shell_validate_ddr_dest(const struct shell *sh, uintptr_t addr,
 	size_t max_len = *max_inout;
 	size_t room;
 	size_t i;
-	struct tftp_shell_deny_range deny[4];
+	struct tftp_shell_deny_range deny[3];
 	size_t deny_cnt = 0;
 
 	if (addr < TFTP_SHELL_DDR_LOW_BASE || addr >= TFTP_SHELL_DDR_LOW_END) {
@@ -200,12 +201,6 @@ static int tftp_shell_validate_ddr_dest(const struct shell *sh, uintptr_t addr,
 	deny[deny_cnt].base = (uintptr_t)DT_REG_ADDR(TFTP_SHELL_MBOX_NODE);
 	deny[deny_cnt].size = (size_t)DT_REG_SIZE(TFTP_SHELL_MBOX_NODE);
 	deny[deny_cnt].name = "TF-A mailbox (mbox_ddr)";
-	deny_cnt++;
-#endif
-#if DT_NODE_EXISTS(TFTP_SHELL_FPGA_CONFIG_NODE)
-	deny[deny_cnt].base = (uintptr_t)DT_REG_ADDR(TFTP_SHELL_FPGA_CONFIG_NODE);
-	deny[deny_cnt].size = (size_t)DT_REG_SIZE(TFTP_SHELL_FPGA_CONFIG_NODE);
-	deny[deny_cnt].name = "fpga_config";
 	deny_cnt++;
 #endif
 
@@ -385,7 +380,7 @@ static int tftp_ddr_args_to_params(const struct shell *sh, struct tftp_ddr_shell
 	requested_size = ctx->ddr_max;
 
 #if defined(CONFIG_SOC_AGILEX5)
-	/* Restricted-region check is Agilex5-only (FSBL/mem0/mbox/fpga_config). */
+	/* Restricted-region check is Agilex5-only (FSBL/mem0/mbox). */
 	ret = tftp_shell_validate_ddr_dest(sh, (uintptr_t)ctx->ddr_base, &ctx->ddr_max);
 	if (ret < 0) {
 		ctx->ddr_base = NULL;
@@ -546,12 +541,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(tftp_cmds,
 	SHELL_CMD_ARG(get_ddr, NULL,
 		      "net tftp get_ddr -s <addr>[:port] -f <file> -a <ddr> "
 		      "[-z <max>] [-m <mode>] "
-		      "(Agilex5: rejects FSBL/mem0/mbox/fpga_config DDR)",
+		      "(Agilex5: rejects FSBL/mem0/mbox DDR; fpga_config allowed)",
 		      cmd_tftp_get_ddr, 7, 4),
 	SHELL_CMD_ARG(put_ddr, NULL,
 		      "net tftp put_ddr -s <addr>[:port] -f <file> -a <ddr> -z <size> "
 		      "[-m <mode>] "
-		      "(Agilex5: rejects FSBL/mem0/mbox/fpga_config DDR)",
+		      "(Agilex5: rejects FSBL/mem0/mbox DDR; fpga_config allowed)",
 		      cmd_tftp_put_ddr, 9, 2),
 	SHELL_SUBCMD_SET_END
 );

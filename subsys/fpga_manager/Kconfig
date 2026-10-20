@@ -16,9 +16,12 @@ source "subsys/logging/Kconfig.template.log_config"
 
 config FPGA_MANAGER_INTEL
 	bool "FPGA Manager for Intel devices"
-	depends on FILE_SYSTEM && ARM_SIP_SVC_SUBSYS && FPGA_BRIDGE && FPGA_BRIDGE_INTEL
+	depends on ARM_SIP_SVC_SUBSYS
 	help
-	  Enable FPGA Manager support for Intel devices.
+	  Enable FPGA Manager support for Intel devices. Registers its own
+	  SiP SVC client. Load expects bitstream already in FPGA_CONFIG memory
+	  (no filesystem read). Bridge isolation is via fpga_off()/fpga_on() on
+	  the Altera Agilex bridge device (when enabled), not inside load.
 
 config FPGA_MANAGER_SHELL
 	bool "FPGA Manager shell"
@@ -28,7 +31,7 @@ config FPGA_MANAGER_SHELL
 
 config FPGA_MANAGER_THREAD_STACK_SIZE
 	int "FPGA Manager thread stack size"
-	default 900
+	default 4096
 	depends on FPGA_MANAGER_INTEL
 	help
 	  Stack size of the FPGA Manager thread

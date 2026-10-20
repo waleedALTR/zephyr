@@ -4,7 +4,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 config ALTERA_AGILEX_BRIDGE_FPGA
-	bool "ALTERA fpga driver"
+	bool "Altera/Intel SoCFPGA Agilex FPGA bridge"
 	depends on ARM_SIP_SVC_SUBSYS
 	help
-	  Enable ALTERA FPGA driver.
+	  Zephyr FPGA driver (fpga.h) for Agilex HPS↔FPGA bridges (on/off).
+	  Uses its own SiP SVC client. FPGA load/status is via FPGA manager.

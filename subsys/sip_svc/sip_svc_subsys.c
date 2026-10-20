@@ -109,6 +109,9 @@
 
 #include <zephyr/sip_svc/sip_svc.h>
 #include <zephyr/sip_svc/sip_svc_controller.h>
+#if defined(CONFIG_SOC_AGILEX5)
+#include <zephyr/drivers/sip_svc/sip_svc_agilex_mbox_ddr.h>
+#endif
 #include <zephyr/drivers/sip_svc/sip_svc_driver.h>
 #include <zephyr/sys/iterable_sections.h>
 #include "sip_svc_id_mgr.h"
@@ -487,7 +490,14 @@ static void sip_svc_callback(struct sip_svc_controller *ctrl, uint32_t trans_id,
 			(((uint64_t)trans_id_item->arg2) << 32) | ((uint64_t)trans_id_item->arg3);
 
 		if (data_addr) {
+#if defined(CONFIG_SOC_AGILEX5)
+			/* Static MBOX_DDR buffers must not be heap-freed (UAF/crash). */
+			if (!sip_svc_is_mbox_ddr_buffer((void *)(uintptr_t)data_addr)) {
+				k_free((char *)data_addr);
+			}
+#else
 			k_free((char *)data_addr);
+#endif
 		}
 	}
 

@@ -1,0 +1,11 @@
+# Copyright (c) 2024, Intel Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Altera/Intel SoCFPGA Agilex HPS↔FPGA bridge control, exposed as a Zephyr
+  FPGA device (fpga.h). Full bitstream load is provided when FPGA manager is
+  enabled; on/off map to SET_HPS_BRIDGES.
+
+compatible: "altr,socfpga-agilex-bridge"
+
+include: base.yaml

@@ -32,20 +32,6 @@ int32_t fpga_load(char *image_ptr, uint32_t img_size, uint32_t config_type, char
 	return fpga_load_plat(image_ptr, img_size, config_type, dev);
 }
 
-__weak int32_t fpga_load_file_plat(const char *const filename, const uint32_t config_type,
-				   char *dev)
-{
-	ARG_UNUSED(filename);
-	ARG_UNUSED(config_type);
-	ARG_UNUSED(dev);
-	return -ENOSYS;
-}
-
-int32_t fpga_load_file(const char *const filename, const uint32_t config_type, char *dev)
-{
-	return fpga_load_file_plat(filename, config_type, dev);
-}
-
 __weak int32_t fpga_get_memory_plat(char **phyaddr, uint32_t *size)
 {
 	ARG_UNUSED(phyaddr);

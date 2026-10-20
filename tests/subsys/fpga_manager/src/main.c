@@ -31,37 +31,6 @@ ZTEST(fpga_manager_stack, test_fpga_status)
 }
 
 /* Verifying the FPGA configuration*/
-ZTEST(fpga_manager_stack, test_fpga_load_file)
-{
-	int ret;
-	char *freeze_ctrl = NULL;
-
-	/* Check invalid configuration type */
-	ret = fpga_load_file("file", -1, freeze_ctrl);
-	zassert_equal(ret, -ENOTSUP, "FPGA configuration not supported");
-
-	/* Check null freeze controller driver node */
-	ret = fpga_load_file("file", 1, freeze_ctrl);
-	zassert_equal(ret, -ENODEV, "No such device found");
-
-	/* Check invalid file with partial configuration type */
-	ret = fpga_load_file("file", 1, "freeze_controller0@f9000450");
-	zassert_equal(ret, -ENOENT, "No such file or directory");
-
-	/* Check invalid file and null freeze device node with full configuration type */
-	ret = fpga_load_file("file", 0, NULL);
-	zassert_equal(ret, -ENOENT, "No such file or directory");
-
-	/* Check invalid file and valid freeze device node with full configuration type */
-	ret = fpga_load_file("file", 0, "freeze_controller0@f9000450");
-	zassert_equal(ret, -ENOENT, "No such file or directory");
-
-	/* Check ascii configuration type */
-	ret = fpga_load_file("file", 'A', NULL);
-	zassert_equal(ret, -ENOTSUP, "Please provide correct configuration type");
-}
-
-/* Verifying the FPGA configuration*/
 ZTEST(fpga_manager_stack, test_fpga_load)
 {
 	char *fpga_memory_addr;

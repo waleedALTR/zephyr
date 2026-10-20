@@ -45,6 +45,9 @@ static bool intel_sip_smc_plat_func_id_valid(const struct device *dev, uint32_t 
 		case SMC_FUNC_ID_REG_UPDATE:
 		case SMC_FUNC_ID_SET_HPS_BRIDGES:
 		case SMC_FUNC_ID_RSU_UPDATE_ADDR:
+		/* Agilex5: SDM remapper enable before V2 mailbox RECONFIG_DATA */
+		case SMC_FUNC_ID_SDM_REMAPPER_CONFIG:
+		case SMC_FUNC_ID_FPGA_CONFIG_START: /* optional / experiments */
 			valid = true;
 			break;
 		default:

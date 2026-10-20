@@ -49,6 +49,10 @@
 	zephyr,num-clients = <5>;
 };
 
+&fpga_config {
+	status = "okay";
+};
+
 &gpio0 {
 	status = "okay";
 };

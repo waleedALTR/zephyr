@@ -12,12 +12,25 @@
 #include <zephyr/logging/log.h>
 #include "fpga_bridge_intel.h"
 
+#if defined(CONFIG_SOC_AGILEX5)
+#include <zephyr/drivers/sip_svc/sip_svc_agilex_mbox_ddr.h>
+#endif
+
 LOG_MODULE_REGISTER(fpga_bridge, CONFIG_FPGA_BRIDGE_LOG_LEVEL);
 
 #define MAX_TIMEOUT_MSECS (1 * 1000UL)
 
 static uint32_t mailbox_client_token;
 static struct sip_svc_controller *mailbox_smc_dev;
+
+#if defined(CONFIG_SOC_AGILEX5)
+/* TF-A requires mailbox buffers in mbox_ddr (>= BL31_LIMIT); k_malloc is in SRAM. */
+static SOCFPGA_MBOX_DDR uint32_t mbox_cmd_buf[DIV_ROUND_UP(FPGA_MB_CMD_ADDR_MEM_SIZE,
+							   sizeof(uint32_t))] __aligned(64);
+static SOCFPGA_MBOX_DDR uint32_t mbox_resp_buf[DIV_ROUND_UP(FPGA_MB_RESPONSE_MEM_SIZE,
+							    sizeof(uint32_t))] __aligned(64);
+static SOCFPGA_MBOX_DDR uint32_t mbox_cancel_cmd __aligned(4);
+#endif
 
 /**
  * @brief Open SiP SVC client session
@@ -73,8 +86,13 @@ static int32_t svc_client_close(void)
 	int32_t err;
 	uint32_t cmd_size = sizeof(uint32_t);
 	struct sip_svc_request request;
+	uint32_t *cmd_addr;
 
-	uint32_t *cmd_addr = (uint32_t *)k_malloc(cmd_size);
+#if defined(CONFIG_SOC_AGILEX5)
+	mbox_cancel_cmd = MAILBOX_CANCEL_COMMAND;
+	cmd_addr = &mbox_cancel_cmd;
+#else
+	cmd_addr = (uint32_t *)k_malloc(cmd_size);
 
 	if (!cmd_addr) {
 		return -ENOMEM;
@@ -82,6 +100,7 @@ static int32_t svc_client_close(void)
 
 	/* Fill the SiP SVC buffer with CANCEL request */
 	*cmd_addr = MAILBOX_CANCEL_COMMAND;
+#endif
 
 	request.header = SIP_SVC_PROTO_HEADER(SIP_SVC_PROTO_CMD_ASYNC, 0);
 	request.a0 = SMC_FUNC_ID_MAILBOX_SEND_COMMAND;
@@ -98,7 +117,9 @@ static int32_t svc_client_close(void)
 
 	err = sip_svc_close(mailbox_smc_dev, mailbox_client_token, &request);
 	if (err) {
+#if !defined(CONFIG_SOC_AGILEX5)
 		k_free(cmd_addr);
+#endif
 		LOG_ERR("Mailbox client close fail (%d)", err);
 	}
 
@@ -167,10 +188,13 @@ static void smc_callback(uint32_t c_token, struct sip_svc_response *response)
 
 	/* Client only responsible to free the response data memory space,
 	 * the command data memory space had been freed by SiP SVC service.
+	 * Agilex5 MBOX_DDR buffers are static and must not be freed.
 	 */
 	if (response->resp_data_addr) {
+#if !defined(CONFIG_SOC_AGILEX5)
 		LOG_DBG("\tFree response memory %p", (char *)response->resp_data_addr);
 		k_free((char *)response->resp_data_addr);
+#endif
 	}
 
 	k_sem_give(&(private_data->smc_sem));
@@ -201,18 +225,23 @@ static int32_t smc_send(uint32_t cmd_type, uint64_t function_identifier, uint32_
 	}
 
 	if (cmd_type == SIP_SVC_PROTO_CMD_ASYNC) {
+#if defined(CONFIG_SOC_AGILEX5)
+		cmd_addr = mbox_cmd_buf;
+		resp_addr = mbox_resp_buf;
+#else
 		cmd_addr = (uint32_t *)k_malloc(FPGA_MB_CMD_ADDR_MEM_SIZE);
 		if (!cmd_addr) {
 			LOG_ERR("Failed to allocate command memory");
 			return -ENOMEM;
 		}
-		cmd_addr[MBOX_CMD_HEADER_INDEX] =
-			MBOX_REQUEST_HEADER(cmd_request[SMC_REQUEST_A2_INDEX], 0, 0);
 		resp_addr = (uint32_t *)k_malloc(FPGA_MB_RESPONSE_MEM_SIZE);
 		if (!resp_addr) {
 			k_free(cmd_addr);
 			return -ENOMEM;
 		}
+#endif
+		cmd_addr[MBOX_CMD_HEADER_INDEX] =
+			MBOX_REQUEST_HEADER(cmd_request[SMC_REQUEST_A2_INDEX], 0, 0);
 
 		request.a2 = (uint64_t)cmd_addr;
 		request.a3 = sizeof(uint32_t);
@@ -246,6 +275,12 @@ static int32_t smc_send(uint32_t cmd_type, uint64_t function_identifier, uint32_
 	trans_id = sip_svc_send(mailbox_smc_dev, mailbox_client_token, &request, smc_callback);
 
 	if (trans_id == SIP_SVC_ID_INVALID) {
+#if !defined(CONFIG_SOC_AGILEX5)
+		if (cmd_type == SIP_SVC_PROTO_CMD_ASYNC) {
+			k_free(cmd_addr);
+			k_free(resp_addr);
+		}
+#endif
 		LOG_ERR("SiP SVC send request fail");
 		return -EBUSY;
 	}
@@ -376,22 +411,16 @@ int32_t do_bridge_reset_plat(uint32_t enable, uint32_t mask)
 		return -EIO;
 	}
 
-	printk("is_fpga_config_not_ready ret=%d\n", ret);
-
 	/* Bridge reset */
 	ret = socfpga_bridges_reset(enable, mask);
 	if (ret) {
-		LOG_ERR("Bridge reset failed");
+		LOG_INF("Bridge reset failed");
 	}
-
-	printk("socfpga_bridges_reset ret=%d\n", ret);
 
 	/* Ignoring the return value to return bridge reset status */
 	if (svc_client_close()) {
 		LOG_ERR("Unregistering & Closing failed");
 	}
-	
-	printk("do_bridge_reset_plat ret=%d\n", ret);
 
 	return ret;
 }
