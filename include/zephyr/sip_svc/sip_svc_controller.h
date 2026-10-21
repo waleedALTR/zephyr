@@ -45,8 +45,6 @@ struct sip_svc_client {
 	uint32_t active_trans_cnt;
 	/* Private data of each client , Provided during sip_svc_register() */
 	void *priv_data;
-	/* Transaction id pool for each client */
-	struct sip_svc_id_pool *trans_idx_pool;
 };
 
 /**
@@ -73,6 +71,8 @@ struct sip_svc_controller {
 	const struct device *dev;
 	/* Pointer to client id pool */
 	struct sip_svc_id_pool *client_id_pool;
+	/* Transaction id pool shared by all clients */
+	struct sip_svc_id_pool *trans_idx_pool;
 	/* Pointer to database for storing arguments from sip_svc_send() */
 	struct sip_svc_id_map *trans_id_map;
 	/* Pointer to client array */

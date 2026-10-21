@@ -52,7 +52,8 @@ config ARM_SIP_SVC_SUBSYS_MAX_TRANSACTION_ID_COUNT
 	int
 	default 16
 	help
-	  Maximum number of transaction_id per client.
+	  Maximum number of transaction_id per controller, shared by all of
+	  its clients.
 
 config ARM_SIP_SVC_SUBSYS_ASYNC_POLLING_DELAY
 	int "Delay used for polling asynchronous jobs in micro-seconds"

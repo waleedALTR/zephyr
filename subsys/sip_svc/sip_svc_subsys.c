@@ -423,7 +423,7 @@ static void sip_svc_callback(struct sip_svc_controller *ctrl, uint32_t trans_id,
 
 	/* Free trans id */
 	sip_svc_id_map_remove_item(ctrl->trans_id_map, trans_id);
-	sip_svc_id_mgr_free(ctrl->clients[c_idx].trans_idx_pool,
+	sip_svc_id_mgr_free(ctrl->trans_idx_pool,
 			    sip_svc_plat_get_trans_idx(ctrl->dev, trans_id));
 
 	if (ctrl->clients[c_idx].active_trans_cnt != 0) {
@@ -683,7 +683,7 @@ int sip_svc_send(void *ct, uint32_t c_token, struct sip_svc_request *request, si
 	}
 
 	/* Allocate a trans id for the request */
-	trans_idx = sip_svc_id_mgr_alloc(ctrl->clients[c_idx].trans_idx_pool);
+	trans_idx = sip_svc_id_mgr_alloc(ctrl->trans_idx_pool);
 	if (trans_idx == SIP_SVC_ID_INVALID) {
 		LOG_ERR("Fail to allocate transaction id");
 		k_mutex_unlock(&ctrl->data_mutex);
@@ -694,7 +694,7 @@ int sip_svc_send(void *ct, uint32_t c_token, struct sip_svc_request *request, si
 	/* Additional check for an unsupported condition*/
 	if (((int)trans_id) < 0) {
 		LOG_ERR("Unsupported condition, trans_id < 0");
-		sip_svc_id_mgr_free(ctrl->clients[c_idx].trans_idx_pool, trans_idx);
+		sip_svc_id_mgr_free(ctrl->trans_idx_pool, trans_idx);
 		k_mutex_unlock(&ctrl->data_mutex);
 		return -ENOTSUP;
 	}
@@ -710,7 +710,7 @@ int sip_svc_send(void *ct, uint32_t c_token, struct sip_svc_request *request, si
 				       request->priv_data, (void *)(uint64_t)c_idx) != 0) {
 
 		LOG_ERR("Fail to insert transaction id to map");
-		sip_svc_id_mgr_free(ctrl->clients[c_idx].trans_idx_pool, trans_idx);
+		sip_svc_id_mgr_free(ctrl->trans_idx_pool, trans_idx);
 		k_mutex_unlock(&ctrl->data_mutex);
 		return -ENOMSG;
 	}
@@ -720,7 +720,7 @@ int sip_svc_send(void *ct, uint32_t c_token, struct sip_svc_request *request, si
 	if (k_msgq_put(&ctrl->req_msgq, (void *)request, K_NO_WAIT) != 0) {
 		LOG_ERR("Request msgq full");
 		sip_svc_id_map_remove_item(ctrl->trans_id_map, trans_id);
-		sip_svc_id_mgr_free(ctrl->clients[c_idx].trans_idx_pool, trans_idx);
+		sip_svc_id_mgr_free(ctrl->trans_idx_pool, trans_idx);
 		k_mutex_unlock(&ctrl->data_mutex);
 		return -ENOBUFS;
 	}
@@ -729,7 +729,7 @@ int sip_svc_send(void *ct, uint32_t c_token, struct sip_svc_request *request, si
 	if (!ctrl->tid) {
 		LOG_ERR("Thread not spawned during init");
 		sip_svc_id_map_remove_item(ctrl->trans_id_map, trans_id);
-		sip_svc_id_mgr_free(ctrl->clients[c_idx].trans_idx_pool, trans_idx);
+		sip_svc_id_mgr_free(ctrl->trans_idx_pool, trans_idx);
 		k_mutex_unlock(&ctrl->data_mutex);
 		return -EHOSTDOWN;
 	}
@@ -791,7 +791,6 @@ void *sip_svc_get_controller(char *method)
 
 static int sip_svc_subsys_init(void)
 {
-	int ret = 0;
 	uint32_t ctrl_count = 0;
 	char *msgq_buf = NULL;
 	struct device *dev = NULL;
@@ -834,10 +833,20 @@ static int sip_svc_subsys_init(void)
 			return -ENOMEM;
 		}
 
+		ctrl->trans_idx_pool =
+			sip_svc_id_mgr_create(CONFIG_ARM_SIP_SVC_SUBSYS_MAX_TRANSACTION_ID_COUNT);
+		if (!ctrl->trans_idx_pool) {
+			sip_svc_id_mgr_delete(ctrl->client_id_pool);
+			sip_svc_id_map_delete(ctrl->trans_id_map);
+			k_free(ctrl->async_resp_data);
+			return -ENOMEM;
+		}
+
 		/* Alloc request msgq ring buffer */
 		msgq_buf = k_malloc(sizeof(struct sip_svc_request) *
 				    CONFIG_ARM_SIP_SVC_SUBSYS_MSGQ_DEPTH);
 		if (!msgq_buf) {
+			sip_svc_id_mgr_delete(ctrl->trans_idx_pool);
 			sip_svc_id_mgr_delete(ctrl->client_id_pool);
 			sip_svc_id_map_delete(ctrl->trans_id_map);
 			k_free(ctrl->async_resp_data);
@@ -846,6 +855,7 @@ static int sip_svc_subsys_init(void)
 
 		ctrl->clients = k_malloc(ctrl->num_clients * sizeof(struct sip_svc_client));
 		if (ctrl->clients == NULL) {
+			sip_svc_id_mgr_delete(ctrl->trans_idx_pool);
 			sip_svc_id_mgr_delete(ctrl->client_id_pool);
 			sip_svc_id_map_delete(ctrl->trans_id_map);
 			k_free(msgq_buf);
@@ -866,29 +876,6 @@ static int sip_svc_subsys_init(void)
 			client->token = SIP_SVC_ID_INVALID;
 			client->state = SIP_SVC_CLIENT_ST_INVALID;
 			client->active_trans_cnt = 0;
-
-			client->trans_idx_pool = sip_svc_id_mgr_create(
-				CONFIG_ARM_SIP_SVC_SUBSYS_MAX_TRANSACTION_ID_COUNT);
-			if (!client->trans_idx_pool) {
-				ret = -ENOMEM;
-				break;
-			}
-		}
-
-		if (ret != 0) {
-			sip_svc_id_mgr_delete(ctrl->client_id_pool);
-			sip_svc_id_map_delete(ctrl->trans_id_map);
-			k_free(msgq_buf);
-			k_free(ctrl->clients);
-			k_free(ctrl->async_resp_data);
-
-			for (uint32_t i = 0; i < ctrl->num_clients; i++) {
-				client = &ctrl->clients[i];
-				if (client->trans_idx_pool) {
-					sip_svc_id_mgr_delete(client->trans_idx_pool);
-				}
-			}
-			return ret;
 		}
 
 		k_sem_init(&ctrl->thread_sem, 0, 1);
