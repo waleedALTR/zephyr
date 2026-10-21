@@ -1,10 +1,23 @@
 # FPGA ALTERA driver configuration options
 
-# Copyright (c) 2024, Intel Corporation. All rights reserved.
+# Copyright (c) 2024-2026, Intel Corporation. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 config ALTERA_AGILEX_BRIDGE_FPGA
-	bool "ALTERA fpga driver"
+	bool "Altera/Intel SoCFPGA Agilex FPGA device"
 	depends on ARM_SIP_SVC_SUBSYS
 	help
-	  Enable ALTERA FPGA driver.
+	  Zephyr FPGA driver (fpga.h) for Agilex SoC FPGA control (fpga0).
+	  on/off: HPS↔FPGA bridge isolation. load/get_status: full fabric
+	  programming (partial/freeze not supported yet).
+	  Programming code lives in this driver (not a separate shell/subsystem UI).
+
+if ALTERA_AGILEX_BRIDGE_FPGA
+
+config FPGA_ALTERA_PROGRAM_THREAD_STACK_SIZE
+	int "Altera FPGA program thread stack size"
+	default 4096
+	help
+	  Stack size of the worker thread that runs full FPGA reconfiguration.
+
+endif # ALTERA_AGILEX_BRIDGE_FPGA

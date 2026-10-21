@@ -1,0 +1,10 @@
+# Copyright (c) 2024-2026, Intel Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Deprecated alias. Use "altr,socfpga-agilex-fpga".
+  Kept so existing overlays that still say bridge continue to build.
+
+compatible: "altr,socfpga-agilex-bridge"
+
+include: base.yaml

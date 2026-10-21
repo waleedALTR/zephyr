@@ -1,0 +1,12 @@
+# Copyright (c) 2024-2026, Intel Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Altera/Intel SoCFPGA Agilex FPGA control device (fpga.h).
+  on/off map to HPS↔FPGA bridge isolation (SET_HPS_BRIDGES).
+  load/status program the fabric via the FPGA manager (full reconfig only).
+  Bitstream staging is DT memory (fpga_config), not this node.
+
+compatible: "altr,socfpga-agilex-fpga"
+
+include: base.yaml

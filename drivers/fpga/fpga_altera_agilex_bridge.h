@@ -13,12 +13,12 @@
 #define BRIDGE_MASK					0x0F
 /* Mailbox command header index */
 #define MBOX_CMD_HEADER_INDEX       0x00
-/* Mailbox command memory size */
+/* Mailbox command memory size (bytes) */
 #define FPGA_MB_CMD_ADDR_MEM_SIZE   20
-/* Mailbox command response memory size */
-#define FPGA_MB_RESPONSE_MEM_SIZE   20
-/* Config status response length */
+/* Config status response length (words, includes header) */
 #define FPGA_CONFIG_STATUS_RESPONSE_LEN	   0x07
+/* Mailbox response memory size (bytes); must fit config status */
+#define FPGA_MB_RESPONSE_MEM_SIZE   (FPGA_CONFIG_STATUS_RESPONSE_LEN * sizeof(uint32_t))
 
 #define MBOX_CMD_CODE_OFFSET 0x00
 #define MBOX_CMD_ID_MASK     0x7FF

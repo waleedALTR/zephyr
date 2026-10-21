@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#define DT_DRV_COMPAT altr_socfpga_agilex_bridge
+#define DT_DRV_COMPAT altr_socfpga_agilex_fpga
 
 #include <errno.h>
 #include <zephyr/device.h>
@@ -13,6 +13,13 @@
 #include <zephyr/drivers/fpga.h>
 #include <zephyr/logging/log.h>
 #include "fpga_altera_agilex_bridge.h"
+
+/* Config path in fpga_altera_agilex_config.c (same driver). */
+int32_t altera_fpga_config_load(char *image_ptr, uint32_t img_size);
+
+#if defined(CONFIG_SOC_AGILEX5)
+#include <zephyr/drivers/sip_svc/sip_svc_agilex_mbox_ddr.h>
+#endif
 
 LOG_MODULE_REGISTER(fpga_altera, CONFIG_FPGA_LOG_LEVEL);
 
@@ -24,6 +31,15 @@ struct fpga_bridge_dev_data {
 };
 
 #define MAX_TIMEOUT_MSECS (1 * 1000UL)
+
+#if defined(CONFIG_SOC_AGILEX5)
+/* TF-A requires mailbox buffers in mbox_ddr (>= BL31_LIMIT); k_malloc is in SRAM. */
+static SOCFPGA_MBOX_DDR uint32_t mbox_cmd_buf[DIV_ROUND_UP(FPGA_MB_CMD_ADDR_MEM_SIZE,
+							   sizeof(uint32_t))] __aligned(64);
+static SOCFPGA_MBOX_DDR uint32_t mbox_resp_buf[DIV_ROUND_UP(FPGA_MB_RESPONSE_MEM_SIZE,
+							    sizeof(uint32_t))] __aligned(64);
+static SOCFPGA_MBOX_DDR uint32_t mbox_cancel_cmd __aligned(4);
+#endif
 
 /**
  * @brief Open SiP SVC client session
@@ -39,7 +55,7 @@ static int32_t svc_client_open(const struct device *dev)
 
 	struct fpga_bridge_dev_data *const data = (struct fpga_bridge_dev_data *const)(dev->data);
 
-	if ((!data->mailbox_smc_dev) || (data->mailbox_client_token == 0)) {
+	if ((!data->mailbox_smc_dev) || (data->mailbox_client_token == SIP_SVC_ID_INVALID)) {
 		LOG_ERR("Mailbox client is not registered");
 		return -ENODEV;
 	}
@@ -70,8 +86,13 @@ static int32_t svc_client_close(const struct device *dev)
 	}
 
 	struct fpga_bridge_dev_data *const data = (struct fpga_bridge_dev_data *const)(dev->data);
+	uint32_t *cmd_addr;
 
-	uint32_t *cmd_addr = (uint32_t *)k_malloc(cmd_size);
+#if defined(CONFIG_SOC_AGILEX5)
+	mbox_cancel_cmd = MAILBOX_CANCEL_COMMAND;
+	cmd_addr = &mbox_cancel_cmd;
+#else
+	cmd_addr = (uint32_t *)k_malloc(cmd_size);
 
 	if (!cmd_addr) {
 		return -ENOMEM;
@@ -79,6 +100,7 @@ static int32_t svc_client_close(const struct device *dev)
 
 	/* Fill the SiP SVC buffer with CANCEL request */
 	*cmd_addr = MAILBOX_CANCEL_COMMAND;
+#endif
 
 	request.header = SIP_SVC_PROTO_HEADER(SIP_SVC_PROTO_CMD_ASYNC, 0);
 	request.a0 = SMC_FUNC_ID_MAILBOX_SEND_COMMAND;
@@ -95,7 +117,9 @@ static int32_t svc_client_close(const struct device *dev)
 
 	err = sip_svc_close(data->mailbox_smc_dev, data->mailbox_client_token, &request);
 	if (err) {
+#if !defined(CONFIG_SOC_AGILEX5)
 		k_free(cmd_addr);
+#endif
 		LOG_ERR("Mailbox client close fail (%d)", err);
 	}
 
@@ -165,10 +189,13 @@ static void smc_callback(uint32_t c_token, struct sip_svc_response *response)
 
 	/* Client only responsible to free the response data memory space,
 	 * the command data memory space had been freed by SiP SVC service.
+	 * Agilex5 MBOX_DDR buffers are static and must not be freed.
 	 */
 	if (response->resp_data_addr) {
+#if !defined(CONFIG_SOC_AGILEX5)
 		LOG_DBG("\tFree response memory %p", (char *)response->resp_data_addr);
 		k_free((char *)response->resp_data_addr);
+#endif
 	}
 
 	k_sem_give(&(private_data->smc_sem));
@@ -206,18 +233,23 @@ static int32_t smc_send(const struct device *dev, uint32_t cmd_type, uint64_t fu
 	}
 
 	if (cmd_type == SIP_SVC_PROTO_CMD_ASYNC) {
+#if defined(CONFIG_SOC_AGILEX5)
+		cmd_addr = mbox_cmd_buf;
+		resp_addr = mbox_resp_buf;
+#else
 		cmd_addr = (uint32_t *)k_malloc(FPGA_MB_CMD_ADDR_MEM_SIZE);
 		if (!cmd_addr) {
 			LOG_ERR("Failed to allocate command memory");
 			return -ENOMEM;
 		}
-		cmd_addr[MBOX_CMD_HEADER_INDEX] =
-			MBOX_REQUEST_HEADER(cmd_request[SMC_REQUEST_A2_INDEX], 0, 0);
 		resp_addr = (uint32_t *)k_malloc(FPGA_MB_RESPONSE_MEM_SIZE);
 		if (!resp_addr) {
 			k_free(cmd_addr);
 			return -ENOMEM;
 		}
+#endif
+		cmd_addr[MBOX_CMD_HEADER_INDEX] =
+			MBOX_REQUEST_HEADER(cmd_request[SMC_REQUEST_A2_INDEX], 0, 0);
 
 		request.a2 = (uint64_t)cmd_addr;
 		request.a3 = sizeof(uint32_t);
@@ -252,6 +284,12 @@ static int32_t smc_send(const struct device *dev, uint32_t cmd_type, uint64_t fu
 				smc_callback);
 
 	if (trans_id == SIP_SVC_ID_INVALID) {
+#if !defined(CONFIG_SOC_AGILEX5)
+		if (cmd_type == SIP_SVC_PROTO_CMD_ASYNC) {
+			k_free(cmd_addr);
+			k_free(resp_addr);
+		}
+#endif
 		LOG_ERR("SiP SVC send request fail");
 		return -EBUSY;
 	}
@@ -373,7 +411,6 @@ static int altera_fpga_on(const struct device *dev)
 		return -ENODEV;
 	}
 
-	/* Opening SIP SVC session */
 	ret = svc_client_open(dev);
 	if (ret) {
 		LOG_ERR("Client open Failed!");
@@ -388,13 +425,11 @@ static int altera_fpga_on(const struct device *dev)
 		return -EIO;
 	}
 
-	/* Bridge reset */
 	ret = socfpga_bridges_reset(dev, 0x01);
 	if (ret) {
 		LOG_ERR("Bridge reset failed");
 	}
 
-	/* Ignoring the return value to return bridge reset status */
 	if (svc_client_close(dev)) {
 		LOG_ERR("Unregistering & Closing failed");
 	}
@@ -411,14 +446,12 @@ static int altera_fpga_off(const struct device *dev)
 		return -ENODEV;
 	}
 
-	/* Opening SIP SVC session */
 	ret = svc_client_open(dev);
 	if (ret) {
 		LOG_ERR("Client open Failed!");
 		return ret;
 	}
 
-	/* Check FPGA status before bridge enable/disable */
 	ret = fpga_config_ready_check(dev);
 	if (ret) {
 		LOG_ERR("FPGA not ready. Bridge reset aborted!");
@@ -426,18 +459,50 @@ static int altera_fpga_off(const struct device *dev)
 		return -EIO;
 	}
 
-	/* Bridge reset */
 	ret = socfpga_bridges_reset(dev, 0x00);
 	if (ret) {
 		LOG_ERR("Bridge reset failed");
 	}
 
-	/* Ignoring the return value to return bridge reset status */
 	if (svc_client_close(dev)) {
 		LOG_ERR("Unregistering & Closing failed");
 	}
 
 	return ret;
+}
+
+/* Bridges are toggled inside the program path (off → program → on). */
+static int altera_fpga_load(const struct device *dev, uint32_t *image_ptr, uint32_t img_size)
+{
+	ARG_UNUSED(dev);
+
+	return altera_fpga_config_load((char *)image_ptr, img_size);
+}
+
+static enum FPGA_status altera_fpga_get_status(const struct device *dev)
+{
+	int32_t ret;
+
+	if (!dev) {
+		return FPGA_STATUS_INACTIVE;
+	}
+
+	ret = svc_client_open(dev);
+	if (ret) {
+		return FPGA_STATUS_INACTIVE;
+	}
+
+	ret = fpga_config_ready_check(dev);
+	(void)svc_client_close(dev);
+
+	return ret ? FPGA_STATUS_INACTIVE : FPGA_STATUS_ACTIVE;
+}
+
+static const char *altera_fpga_get_info(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+
+	return "Intel SoCFPGA Agilex FPGA (full reconfig; bridges in load)";
 }
 
 static int altera_fpga_init(const struct device *dev)
@@ -468,15 +533,18 @@ static int altera_fpga_init(const struct device *dev)
 static DEVICE_API(fpga, altera_fpga_api) = {
 	.on = altera_fpga_on,
 	.off = altera_fpga_off,
+	.get_status = altera_fpga_get_status,
+	.get_info = altera_fpga_get_info,
+	.load = altera_fpga_load,
 };
 
-#define CREATE_ALTERA_FPGA_BRIDGE_DEV(inst)						\
+#define CREATE_ALTERA_FPGA_BRIDGE_DEV(inst)					\
 	static struct fpga_bridge_dev_data fpga_bridge_data_##inst;		\
 	DEVICE_DT_INST_DEFINE(inst,						\
 			altera_fpga_init,					\
 			NULL, &fpga_bridge_data_##inst,				\
-			NULL, POST_KERNEL,			\
+			NULL, POST_KERNEL,					\
 			CONFIG_FPGA_INIT_PRIORITY,				\
-			&altera_fpga_api);					\
+			&altera_fpga_api);
 
 DT_INST_FOREACH_STATUS_OKAY(CREATE_ALTERA_FPGA_BRIDGE_DEV);

@@ -145,8 +145,8 @@
 		status = "disabled";
 	};
 
-	fpga0: bridges {
-		compatible = "altr,socfpga-agilex-bridge";
+	fpga0: fpga {
+		compatible = "altr,socfpga-agilex-fpga";
 	};
 
         fpga_pio_led0: pio_led0@20010080 {
