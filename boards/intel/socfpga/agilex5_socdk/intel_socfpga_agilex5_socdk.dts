@@ -29,6 +29,18 @@
 			gpios = <&gpio0 11 GPIO_ACTIVE_HIGH>;
 		};
 	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		mbox_shm: memory@82000000 {
+			compatible = "zephyr,memory-region";
+			reg = <0x82000000 DT_SIZE_K(64)>;
+			zephyr,memory-region = "MBOX_SHARED_RAM";
+		};
+	};
 };
 
 &gpio0 {
@@ -48,6 +60,10 @@
 		disk-name = "SD";
 		status = "okay";
 	};
+};
+
+&sip_smc {
+	shared-memory = <&mbox_shm>;
 };
 
 &uart0 {

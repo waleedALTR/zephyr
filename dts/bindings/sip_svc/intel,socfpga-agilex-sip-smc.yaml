@@ -16,6 +16,11 @@ properties:
     description: |
       The method of calling the EL3 firmware.The current driver only supports
       communication with EL3 firmware.
+  shared-memory:
+    type: phandle
+    description: |
+      Phandle to a memory region shared with EL3 firmware. The first half
+      holds mailbox commands and the second half holds mailbox responses.
   zephyr,num-clients:
     type: int
     required: true

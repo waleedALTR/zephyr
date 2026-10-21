@@ -8,6 +8,8 @@
  */
 
 #include <string.h>
+#include <zephyr/cache.h>
+#include <zephyr/sys/device_mmio.h>
 #include <zephyr/drivers/sip_svc/sip_svc_agilex_mailbox.h>
 #include <zephyr/drivers/sip_svc/sip_svc_agilex_smc.h>
 #include <zephyr/drivers/sip_svc/sip_svc_driver.h>
@@ -22,6 +24,19 @@ LOG_MODULE_REGISTER(intel_socfpga_agilex_sip_smc, CONFIG_ARM_SIP_SVC_DRIVER_LOG_
 #define DT_SIP_SMC DT_COMPAT_GET_ANY_STATUS_OKAY(DT_DRV_COMPAT)
 
 #define SIP_SMC_MBOX_ATF_CLIENT_ID 0x1U
+
+#define DT_SIP_SMC_SHM_ADDR                                                                        \
+	COND_CODE_1(DT_NODE_HAS_PROP(DT_SIP_SMC, shared_memory),                                   \
+		    (DT_REG_ADDR(DT_PHANDLE(DT_SIP_SMC, shared_memory))), (0))
+#define DT_SIP_SMC_SHM_SIZE                                                                        \
+	COND_CODE_1(DT_NODE_HAS_PROP(DT_SIP_SMC, shared_memory),                                   \
+		    (DT_REG_SIZE(DT_PHANDLE(DT_SIP_SMC, shared_memory))), (0))
+
+/* Commands use the first half of the shared memory, responses the second */
+#define SIP_SMC_SHM_HALF (DT_SIP_SMC_SHM_SIZE / 2U)
+
+static mm_reg_t sip_smc_shm;
+static K_MUTEX_DEFINE(sip_smc_shm_lock);
 
 static bool intel_sip_smc_plat_func_id_valid(const struct device *dev, uint32_t command,
 					     uint32_t func_id)
@@ -175,7 +190,14 @@ static void intel_sip_secure_monitor_call(const struct device *dev, unsigned lon
 {
 	__ASSERT_NO_MSG(dev != NULL);
 	__ASSERT_NO_MSG(res != NULL);
+
+	bool mbox_cmd = (function_id == SMC_FUNC_ID_MAILBOX_SEND_COMMAND) && (arg1 != 0U);
+	bool mbox_resp = (function_id == SMC_FUNC_ID_MAILBOX_POLL_RESPONSE) && (arg1 != 0U);
+	bool use_shm = (DT_SIP_SMC_SHM_SIZE != 0U) && (mbox_cmd || mbox_resp);
+	void *buf = (void *)arg1;
 	uint64_t start, end;
+	uint32_t *resp = NULL;
+	size_t len = 0;
 
 	LOG_DBG("Before %s call", DT_PROP(DT_SIP_SMC, method));
 	LOG_DBG("\tfunction_id       %08lx", function_id);
@@ -187,11 +209,45 @@ static void intel_sip_secure_monitor_call(const struct device *dev, unsigned lon
 	LOG_DBG("\targ5              %08lx", arg5);
 	LOG_DBG("\targ6              %08lx", arg6);
 
+	if (use_shm) {
+		if (arg2 > SIP_SMC_SHM_HALF) {
+			LOG_ERR("Mailbox buffer size %lu exceeds shared memory size %u", arg2,
+				SIP_SMC_SHM_HALF);
+			res->a0 = SMC_STATUS_INVALID;
+			return;
+		}
+
+		k_mutex_lock(&sip_smc_shm_lock, K_FOREVER);
+
+		/* EL3 only accepts physical addresses */
+		if (mbox_cmd) {
+			memcpy((void *)sip_smc_shm, buf, arg2);
+			arg1 = DT_SIP_SMC_SHM_ADDR;
+		} else {
+			arg1 = DT_SIP_SMC_SHM_ADDR + SIP_SMC_SHM_HALF;
+		}
+	} else if (mbox_cmd) {
+		sys_cache_data_flush_range(buf, arg2);
+	}
+
 	start = k_cycle_get_64();
 	arm_smccc_smc(function_id, arg0, arg1, arg2, arg3, arg4, arg5, arg6, res);
 	end = k_cycle_get_64();
 
-	LOG_INF("Time taken for %08lx is %08lld ns", function_id,
+	if (use_shm) {
+		if (mbox_resp && (((long)res->a0) <= SMC_STATUS_OKAY)) {
+			resp = (uint32_t *)(sip_smc_shm + SIP_SMC_SHM_HALF);
+			len = (SIP_SVC_MB_HEADER_GET_LENGTH(resp[0]) + 1U) * 4U;
+
+			memcpy(buf, resp, MIN(len, arg2));
+		}
+
+		k_mutex_unlock(&sip_smc_shm_lock);
+	} else if (mbox_resp) {
+		sys_cache_data_flush_and_invd_range(buf, arg2);
+	}
+
+	LOG_DBG("Time taken for %08lx is %08lld ns", function_id,
 		k_cyc_to_ns_ceil64(end - start));
 
 	LOG_DBG("After %s call", DT_PROP(DT_SIP_SMC, method));
@@ -208,6 +264,12 @@ static void intel_sip_secure_monitor_call(const struct device *dev, unsigned lon
 static int arm_sip_smc_init(const struct device *dev)
 {
 	ARG_UNUSED(dev);
+
+	if (DT_SIP_SMC_SHM_SIZE != 0U) {
+		/* EL3 accesses the buffers in DRAM, not through this CPU's caches */
+		device_map(&sip_smc_shm, DT_SIP_SMC_SHM_ADDR, DT_SIP_SMC_SHM_SIZE,
+			   K_MEM_ARM_NORMAL_NC | K_MEM_PERM_RW);
+	}
 
 	LOG_INF("Supervisory call %s registered successfully", DT_PROP(DT_SIP_SMC, method));
 
@@ -234,6 +296,10 @@ BUILD_ASSERT((CONFIG_ARM_SIP_SVC_EL3_MAX_ALLOWED_TRANSACTIONS > 0),
 	     "CONFIG_ARM_SIP_SVC_EL3_MAX_ALLOWED_TRANSACTIONS should be greater than 0");
 
 #if DT_HAS_COMPAT_STATUS_OKAY(DT_DRV_COMPAT)
+
+BUILD_ASSERT((DT_SIP_SMC_SHM_SIZE == 0) ||
+		     ((DT_SIP_SMC_SHM_SIZE / 2) >= CONFIG_ARM_SIP_SVC_EL3_MAILBOX_RESPONSE_SIZE),
+	     "shared-memory halves must fit CONFIG_ARM_SIP_SVC_EL3_MAILBOX_RESPONSE_SIZE");
 
 SIP_SVC_CONTROLLER_DEFINE(0, DT_PROP(DT_SIP_SMC, method), DEVICE_DT_GET(DT_SIP_SMC),
 			  DT_PROP(DT_SIP_SMC, zephyr_num_clients),
