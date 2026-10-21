@@ -139,7 +139,7 @@ static int agx5_fpga_config_start(void)
 		LOG_ERR("FPGA_CONFIG_START failed a0=0x%llx", res.a0);
 		return -EIO;
 	}
-	LOG_INF("FPGA_CONFIG_START ok a0=0x%llx", res.a0);
+	LOG_DBG("FPGA_CONFIG_START ok a0=0x%llx", res.a0);
 	return 0;
 }
 static SOCFPGA_MBOX_DDR uint32_t mbox_cancel_cmd __aligned(4);
@@ -397,7 +397,7 @@ static void cmd_send_callback(uint32_t c_token, struct sip_svc_response *respons
 
 	case FPGA_RECONFIG_SEND:
 		if (resp_data && response_header.header_t.error_code == 0x00) {
-			LOG_INF("RECONFIG resp hdr=0x%x data_len=%u resp_words=%u "
+			LOG_DBG("RECONFIG resp hdr=0x%x data_len=%u resp_words=%u "
 				"[%08x %08x %08x]",
 				response_header.header,
 				response_header.header_t.data_length, resp_len,
@@ -417,7 +417,7 @@ static void cmd_send_callback(uint32_t c_token, struct sip_svc_response *respons
 			}
 			fpga_reconfig_dma_count = resp_data[MBOX_RECONFIG_DMA_COUNT];
 			fpga_reconfig_dma_block_size = resp_data[MBOX_RECONFIG_DMA_SIZE];
-			LOG_INF("RECONFIG ok: DMA count=%u block=%u (%u bytes / ~%u KiB)",
+			LOG_DBG("RECONFIG ok: DMA count=%u block=%u (%u bytes / ~%u KiB)",
 				fpga_reconfig_dma_count, fpga_reconfig_dma_block_size,
 				fpga_reconfig_dma_block_size,
 				fpga_reconfig_dma_block_size / 1024U);
@@ -442,10 +442,10 @@ static void cmd_send_callback(uint32_t c_token, struct sip_svc_response *respons
 			break;
 		}
 		if (response_header.header_t.error_code == 0x00) {
-			LOG_INF("RECONFIG_DATA chunk reply ok (mbox_err=0 done=%d)",
+			LOG_DBG("RECONFIG_DATA chunk reply ok (mbox_err=0 done=%d)",
 				private_data->reconfig_data_send_done ? 1 : 0);
 			if (private_data->reconfig_data_send_done == true) {
-				LOG_INF("RECONFIG_DATA done");
+				LOG_DBG("RECONFIG_DATA done");
 				curr_stage = FPGA_RECONFIG_CHECK_STATUS;
 			}
 		} else {
@@ -490,7 +490,7 @@ static void cmd_send_callback(uint32_t c_token, struct sip_svc_response *respons
 					resp_data[MBOX_RECONFIG_STATUS_ERROR_DETAILS];
 
 				if (!private_data->config_status.state) {
-					LOG_INF("RECONFIG_STATUS done: soft=0x%x pin=0x%x "
+					LOG_DBG("RECONFIG_STATUS done: soft=0x%x pin=0x%x "
 						"(need soft CONF_DONE|INIT_DONE=0x3)",
 						private_data->config_status.soft_function_status,
 						private_data->config_status.pin_status.pin_status);
@@ -604,7 +604,7 @@ static int32_t send_reconfig_data(char *buf, size_t size)
 
 	sys_cache_data_flush_range(buf, size);
 
-	LOG_INF("RECONFIG_DATA: phys 0x%lx sdm 0x%lx (%u bytes) credits=%u block=%u",
+	LOG_DBG("RECONFIG_DATA: phys 0x%lx sdm 0x%lx (%u bytes) credits=%u block=%u",
 		(unsigned long)phys_base, (unsigned long)sdm_base, rbf_total, credits,
 		fpga_reconfig_dma_block_size);
 
@@ -724,7 +724,7 @@ wait_one:
 	if (sync_lock->response_status) {
 		return -EINVAL;
 	}
-	LOG_INF("RECONFIG_DATA done (%u submits, %u bytes)", chunk_n, rbf_sent);
+	LOG_DBG("RECONFIG_DATA done (%u submits, %u bytes)", chunk_n, rbf_sent);
 	return 0;
 }
 #else /* !CONFIG_SOC_AGILEX5 */
@@ -755,7 +755,7 @@ static int32_t send_reconfig_data(char *buf, size_t size)
 	k_sem_init(&sync_lock.reconfig_data_sem, 3, 3);
 	k_sem_init(&sync_lock.reconfig_data_send_done_sem, 0, 1);
 
-	LOG_INF("RECONFIG_DATA async start: %u bytes, DMA count %u, block %u",
+	LOG_DBG("RECONFIG_DATA async start: %u bytes, DMA count %u, block %u",
 		(uint32_t)size, fpga_reconfig_dma_count, fpga_reconfig_dma_block_size);
 
 	request_buffer = (struct sip_svc_request *)k_malloc(fpga_reconfig_dma_count *
@@ -1005,7 +1005,7 @@ static void reconfig_start(void *p1, void *p2, void *p3)
 			return;
 		}
 
-		LOG_INF("-> BRIDGE_OFF (full load)");
+		LOG_DBG("-> BRIDGE_OFF (full load)");
 		br_ret = fpga_off(fpga_dev);
 		if (br_ret && br_ret != -EIO) {
 			LOG_ERR("BRIDGE_OFF failed ret=%d", br_ret);
@@ -1014,7 +1014,7 @@ static void reconfig_start(void *p1, void *p2, void *p3)
 			return;
 		}
 		if (br_ret == -EIO) {
-			LOG_INF("BRIDGE_OFF: FPGA not ready, assume already isolated");
+			LOG_DBG("BRIDGE_OFF: FPGA not ready, assume already isolated");
 		}
 	}
 
@@ -1027,7 +1027,7 @@ static void reconfig_start(void *p1, void *p2, void *p3)
 
 		switch (curr_stage) {
 		case FPGA_CONFIG_INIT:
-			LOG_INF("-> CONFIG_INIT (SiP open)");
+			LOG_DBG("-> CONFIG_INIT (SiP open)");
 			ret = svc_client_open();
 			if (!ret) {
 #if defined(CONFIG_SOC_AGILEX5)
@@ -1037,7 +1037,7 @@ static void reconfig_start(void *p1, void *p2, void *p3)
 				 * Skip Zephyr CONFIG_COMP; CANCEL/RECONFIG below
 				 * take the mailbox session for V2 DATA.
 				 */
-				LOG_INF("-> FPGA_CONFIG_START");
+				LOG_DBG("-> FPGA_CONFIG_START");
 				ret = agx5_fpga_config_start();
 				if (ret) {
 					LOG_ERR("FPGA_CONFIG_START failed ret=%d", ret);
@@ -1056,26 +1056,26 @@ static void reconfig_start(void *p1, void *p2, void *p3)
 			break;
 
 		case FPGA_CANCEL_STAGE:
-			LOG_INF("-> CANCEL");
+			LOG_DBG("-> CANCEL");
 			cmd_type = SIP_SVC_PROTO_CMD_ASYNC;
 			function_identifier = SMC_FUNC_ID_MAILBOX_SEND_COMMAND;
 			cmd_id = FPGA_CANCEL;
 			break;
 
 		case FPGA_RECONFIG_SEND:
-			LOG_INF("-> RECONFIG");
+			LOG_DBG("-> RECONFIG");
 			cmd_type = SIP_SVC_PROTO_CMD_ASYNC;
 			function_identifier = SMC_FUNC_ID_MAILBOX_SEND_COMMAND;
 			cmd_id = FPGA_RECONFIG;
 			break;
 
 		case FPGA_RECONFIG_DATA_SEND:
-			LOG_INF("-> RECONFIG_DATA");
+			LOG_DBG("-> RECONFIG_DATA");
 			if (send_reconfig_data(image_ptr, img_size)) {
 				LOG_ERR("RECONFIG_DATA send failed");
 				curr_stage = FPGA_RECONFIG_EXIT;
 			} else {
-				LOG_INF("RECONFIG_DATA done");
+				LOG_DBG("RECONFIG_DATA done");
 				curr_stage = FPGA_RECONFIG_CHECK_STATUS;
 			}
 			continue;
@@ -1107,7 +1107,7 @@ static void reconfig_start(void *p1, void *p2, void *p3)
 					DEVICE_DT_GET(DT_NODELABEL(fpga0));
 				int32_t br_ret;
 
-				LOG_INF("-> BRIDGE_ON (full load success)");
+				LOG_DBG("-> BRIDGE_ON (full load success)");
 				br_ret = fpga_on(fpga_dev);
 				if (br_ret) {
 					LOG_ERR("BRIDGE_ON failed ret=%d "

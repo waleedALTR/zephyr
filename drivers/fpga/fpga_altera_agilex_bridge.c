@@ -420,7 +420,7 @@ static int altera_fpga_on(const struct device *dev)
 	/* Check FPGA status before bridge enable/disable */
 	ret = fpga_config_ready_check(dev);
 	if (ret) {
-		LOG_ERR("FPGA not ready. Bridge reset aborted!");
+		LOG_WRN("FPGA not ready; bridge isolate/enable skipped");
 		svc_client_close(dev);
 		return -EIO;
 	}
@@ -454,7 +454,7 @@ static int altera_fpga_off(const struct device *dev)
 
 	ret = fpga_config_ready_check(dev);
 	if (ret) {
-		LOG_ERR("FPGA not ready. Bridge reset aborted!");
+		LOG_WRN("FPGA not ready; bridge isolate/enable skipped");
 		svc_client_close(dev);
 		return -EIO;
 	}
