@@ -21,6 +21,8 @@ LOG_MODULE_REGISTER(intel_socfpga_agilex_sip_smc, CONFIG_ARM_SIP_SVC_DRIVER_LOG_
 
 #define DT_SIP_SMC DT_COMPAT_GET_ANY_STATUS_OKAY(DT_DRV_COMPAT)
 
+#define SIP_SMC_MBOX_ATF_CLIENT_ID 0x1U
+
 static bool intel_sip_smc_plat_func_id_valid(const struct device *dev, uint32_t command,
 					     uint32_t func_id)
 {
@@ -66,9 +68,10 @@ static uint32_t intel_sip_smc_plat_format_trans_id(const struct device *dev, uin
 						   uint32_t trans_idx)
 {
 	ARG_UNUSED(dev);
+	ARG_UNUSED(client_idx);
 
-	/* Combine the transaction id and client id to get the job id*/
-	return (((client_idx & 0xF) << 4) | (trans_idx & 0xF));
+	/* EL3 only returns async mailbox responses tagged with its own client ID */
+	return (((SIP_SMC_MBOX_ATF_CLIENT_ID & 0xF) << 4) | (trans_idx & 0xF));
 }
 
 static uint32_t intel_sip_smc_plat_get_trans_idx(const struct device *dev, uint32_t trans_id)
@@ -221,6 +224,10 @@ static DEVICE_API(svc, api) = {
 	.sip_svc_plat_async_res_req = intel_sip_smc_plat_async_res_req,
 	.sip_svc_plat_async_res_res = intel_sip_smc_plat_async_res_res,
 	.sip_svc_plat_free_async_memory = intel_sip_smc_plat_free_async_memory};
+
+/* EL3 reserves mailbox job ID 15 */
+BUILD_ASSERT(CONFIG_ARM_SIP_SVC_SUBSYS_MAX_TRANSACTION_ID_COUNT <= 15U,
+	     "Transaction IDs must leave mailbox job ID 15 to EL3");
 
 BUILD_ASSERT((DT_PROP(DT_SIP_SMC, zephyr_num_clients) != 0), "num-clients should not be zero");
 BUILD_ASSERT((CONFIG_ARM_SIP_SVC_EL3_MAX_ALLOWED_TRANSACTIONS > 0),

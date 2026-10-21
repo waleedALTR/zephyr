@@ -18,6 +18,11 @@ config ARM_SIP_SVC_EL3_MAILBOX_RESPONSE_SIZE
 	  the maximum size of response buffer size is 4096 and minimum is 4 bytes.
 	  Also it should be multiple of 4 bytes.
 
+config ARM_SIP_SVC_SUBSYS_MAX_TRANSACTION_ID_COUNT
+	default 15 if ARM_SIP_SVC_HAS_INTEL_SDM_MAILBOX_FIFO
+	help
+	  Transaction IDs are mailbox job IDs, and EL3 reserves job ID 15.
+
 config ARM_SIP_SVC_EL3_MAX_ALLOWED_TRANSACTIONS
 	int "Maximum allowable ongoing transactions."
 	default 16
