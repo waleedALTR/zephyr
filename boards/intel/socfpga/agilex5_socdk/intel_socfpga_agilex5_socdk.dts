@@ -28,6 +28,19 @@
 			label = "FPGA Fabric PIO LED 0";
 		};
 	};
+
+	buttons {
+		compatible = "gpio-keys";
+
+		button0: button_0 {
+			gpios = <&fpga_pio_button0 0 GPIO_ACTIVE_LOW>;
+			label = "FPGA Button";
+		};
+	};
+
+	aliases {
+		sw0 = &button0;
+	};
 };
 
 &sdmmc {
