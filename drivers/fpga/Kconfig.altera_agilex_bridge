@@ -6,11 +6,13 @@
 config ALTERA_AGILEX_BRIDGE_FPGA
 	bool "Altera/Intel SoCFPGA Agilex FPGA device"
 	depends on ARM_SIP_SVC_SUBSYS
+	select DEVICE_DEINIT_SUPPORT
 	help
 	  Zephyr FPGA driver (fpga.h) for Agilex SoC FPGA control (fpga0).
 	  on/off: HPS↔FPGA bridge isolation. load/get_status: full fabric
 	  programming (partial/freeze not supported yet).
 	  Programming code lives in this driver (not a separate shell/subsystem UI).
+	  Fabric soft-IP listed in DT soft-ip are init/deinit'd with on/off.
 
 if ALTERA_AGILEX_BRIDGE_FPGA
 

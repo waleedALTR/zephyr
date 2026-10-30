@@ -233,8 +233,29 @@ static int gpio_init(const struct device *dev)
 
 	DEVICE_MMIO_NAMED_MAP(dev, mm_reg_base, K_MEM_CACHE_NONE);
 
-	/* Configure GPIO device */
+	/* Configure GPIO device (IRQ_CONNECT is one-shot inside cfg_func) */
 	cfg->cfg_func();
+
+	return 0;
+}
+
+static int gpio_deinit(const struct device *dev)
+{
+	const struct gpio_altera_config *cfg = dev->config;
+	struct gpio_altera_data *const data = dev->data;
+	mm_reg_t mm_reg_base;
+	k_spinlock_key_t key;
+
+	if (cfg->irq_num) {
+		irq_disable(cfg->irq_num);
+
+		mm_reg_base = DEVICE_MMIO_NAMED_GET(dev, mm_reg_base);
+		if (mm_reg_base) {
+			key = k_spin_lock(&data->lock);
+			sys_write32(0, mm_reg_base + ALTERA_AVALON_PIO_IRQMASK_OFFSET);
+			k_spin_unlock(&data->lock, key);
+		}
+	}
 
 	return 0;
 }
@@ -375,8 +396,9 @@ static DEVICE_API(gpio, gpio_altera_driver_api) = {
 		.outclear	= DT_INST_PROP(n, outclear),	\
 	};								\
 							\
-	DEVICE_DT_INST_DEFINE(n,			\
+	DEVICE_DT_INST_DEINIT_DEFINE(n,			\
 			      gpio_init,		\
+			      gpio_deinit,		\
 			      NULL,			\
 			      &gpio_altera_data_##n,	\
 			      &gpio_config_##n,		\
@@ -386,7 +408,13 @@ static DEVICE_API(gpio, gpio_altera_driver_api) = {
 									\
 	static void gpio_altera_cfg_func_##n(void)			\
 	{								\
+		static bool irq_connected;				\
+									\
+		if (irq_connected) {					\
+			return;						\
+		}							\
 		LISTIFY(DT_NUM_IRQS(DT_DRV_INST(n)), GPIO_CFG_IRQ, (), n)\
+		irq_connected = true;					\
 	}
 
 DT_INST_FOREACH_STATUS_OKAY(CREATE_GPIO_DEVICE)

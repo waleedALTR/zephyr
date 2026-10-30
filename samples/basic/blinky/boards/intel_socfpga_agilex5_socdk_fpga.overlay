@@ -5,18 +5,35 @@
  */
 
 /*
- * This overlay remaps the default 'led0' alias to the FPGA PIO LED,
- * allowing the generic blinky sample to exercise the gpio_altera_pio
- * driver without modifying the application or the board's default
- * devicetree.
+ * Remap led0 to the FPGA PIO LED and list it under fpga0 soft-ip so
+ * bridge on/off owns deferred init.
  */
 
-&fpga_pio_led0 {
-	status = "okay";
+/ {
+	aliases {
+		led0 = &pio_led0;
+	};
+
+	fpga_pio_led0: pio_led0@20010080 {
+		compatible = "altr,pio-1.0";
+		reg = <0x20010080 0x20>;
+		direction = "output";
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+		zephyr,deferred-init;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		pio_led0: pio_led0 {
+			gpios = <&fpga_pio_led0 0 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Fabric PIO LED 0";
+		};
+	};
 };
 
-/ {
-    aliases {
-        led0 = &pio_led0;
-    };
+&fpga0 {
+	soft-ip = <&fpga_pio_led0>;
 };

@@ -8,11 +8,13 @@
 
 #include <errno.h>
 #include <zephyr/device.h>
+#include <zephyr/init.h>
 #include <zephyr/sip_svc/sip_svc.h>
 #include <zephyr/drivers/sip_svc/sip_svc_agilex_smc.h>
 #include <zephyr/drivers/fpga.h>
 #include <zephyr/logging/log.h>
 #include "fpga_altera_agilex_bridge.h"
+#include "fpga_altera_soft_ip.h"
 
 /* Config path in fpga_altera_agilex_config.c (same driver). */
 int32_t altera_fpga_config_load(char *image_ptr, uint32_t img_size);
@@ -434,6 +436,11 @@ static int altera_fpga_on(const struct device *dev)
 		LOG_ERR("Unregistering & Closing failed");
 	}
 
+	/* Soft-IP MMIO is valid only after bridges are enabled. */
+	if (ret == 0) {
+		altera_fpga_soft_ip_init();
+	}
+
 	return ret;
 }
 
@@ -458,6 +465,9 @@ static int altera_fpga_off(const struct device *dev)
 		svc_client_close(dev);
 		return -EIO;
 	}
+
+	/* Drop fabric drivers while bridges are still up. */
+	altera_fpga_soft_ip_deinit();
 
 	ret = socfpga_bridges_reset(dev, 0x00);
 	if (ret) {

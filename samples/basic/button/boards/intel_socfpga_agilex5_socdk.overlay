@@ -9,12 +9,48 @@
 		led0 = &pio_led0;
 		sw0 = &button0;
 	};
+
+	fpga_pio_led0: pio_led0@20010080 {
+		compatible = "altr,pio-1.0";
+		reg = <0x20010080 0x20>;
+		direction = "output";
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+		zephyr,deferred-init;
+	};
+
+	fpga_pio_button0: pio_button@20010060 {
+		compatible = "altr,pio-1.0";
+		reg = <0x20010060 0x20>;
+		direction = "input";
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 17 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+		zephyr,deferred-init;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		pio_led0: pio_led0 {
+			gpios = <&fpga_pio_led0 0 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Fabric PIO LED 0";
+		};
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+
+		button0: button_0 {
+			gpios = <&fpga_pio_button0 0 GPIO_ACTIVE_LOW>;
+			label = "FPGA Button";
+		};
+	};
 };
 
-&fpga_pio_button0 {
-	status = "okay";
-};
-
-&fpga_pio_led0 {
-	status = "okay";
+&fpga0 {
+	soft-ip = <&fpga_pio_led0 &fpga_pio_button0>;
 };

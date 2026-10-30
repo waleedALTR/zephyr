@@ -7,6 +7,18 @@ description: |
   load/status program the fabric via the FPGA manager (full reconfig only).
   Bitstream staging is DT memory (fpga_config), not this node.
 
+  Fabric soft-IP listed in soft-ip is device_init()'d after bridges are
+  enabled (fpga_on) and device_deinit()'d before bridges are isolated
+  (fpga_off). Those nodes should use zephyr,deferred-init.
+
 compatible: "altr,socfpga-agilex-fpga"
 
 include: base.yaml
+
+properties:
+  soft-ip:
+    type: phandles
+    description: |
+      Fabric soft-IP devices whose lifecycle follows HPS↔FPGA bridges.
+      Initialized after fpga_on enables bridges; de-initialized before
+      fpga_off isolates bridges. Disabled phandles are skipped.

@@ -105,4 +105,8 @@ Build the sample with the FPGA PIO LED overlay to validate the
 .. code-block:: console
 
    west build -b intel_socfpga_agilex5_socdk samples/basic/blinky -- \
-     -DDTC_OVERLAY_FILE=$ZEPHYR_BASE/samples/basic/blinky/boards/intel_socfpga_agilex5_socdk_fpga.overlay
+     -DDTC_OVERLAY_FILE=boards/intel_socfpga_agilex5_socdk_fpga.overlay
+
+Board Kconfig lives in ``boards/intel_socfpga_agilex5_socdk.conf`` (auto-applied).
+For FPGA-first bring-up, enable ``CONFIG_FPGA_ALTERA_AUTO_BRINGUP`` there so boot
+calls ``fpga_on()`` when the fabric is already configured.

@@ -6,6 +6,7 @@ zephyr_library_sources_ifdef(CONFIG_FPGA_SHELL  fpga_shell.c)
 
 zephyr_library_sources_ifdef(CONFIG_ALTERA_AGILEX_BRIDGE_FPGA     fpga_altera_agilex_bridge.c)
 zephyr_library_sources_ifdef(CONFIG_ALTERA_AGILEX_BRIDGE_FPGA     fpga_altera_agilex_config.c)
+zephyr_library_sources_ifdef(CONFIG_ALTERA_AGILEX_BRIDGE_FPGA     fpga_altera_soft_ip.c)
 zephyr_library_sources_ifdef(CONFIG_EOS_S3_FPGA fpga_eos_s3.c)
 zephyr_library_sources_ifdef(CONFIG_ICE40_FPGA  fpga_ice40_common.c)
 zephyr_library_sources_ifdef(CONFIG_ICE40_FPGA_SPI  fpga_ice40_spi.c)
