@@ -101,6 +101,9 @@
 
 	fpga0: fpga {
 		compatible = "altr,socfpga-agilex-fpga";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
 	};
 
 	uart0: uart@ffc02000 {

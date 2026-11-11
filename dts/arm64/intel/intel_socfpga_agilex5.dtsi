@@ -133,11 +133,14 @@
 	 */
 
 	/*
-	 * FPGA control device (bridges + reconfig). Fabric soft-IP nodes and
-	 * the soft-ip phandle list are board/sample overlays (GHRD-specific).
+	 * FPGA control device (bridges + reconfig). GHRD soft-IP are child
+	 * nodes added by board/sample overlays (#address-cells already set).
 	 */
 	fpga0: fpga {
 		compatible = "altr,socfpga-agilex-fpga";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
 	};
 
 	gpio0: gpio@10c03200 {

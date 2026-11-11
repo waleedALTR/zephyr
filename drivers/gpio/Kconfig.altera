@@ -7,3 +7,17 @@ config GPIO_ALTERA_PIO
 	depends on DT_HAS_ALTR_PIO_1_0_ENABLED
 	help
 	  Enable driver for Altera PIO
+
+if GPIO_ALTERA_PIO
+
+config GPIO_ALTERA_PIO_INIT_PRIORITY
+	int "Altera PIO init priority"
+	default 76 if ALTERA_AGILEX_BRIDGE_FPGA
+	default GPIO_INIT_PRIORITY
+	help
+	  When PIO nodes are children of fpga0, this must be greater than
+	  FPGA_INIT_PRIORITY so DT dependency order passes validation.
+	  Fabric PIO should use zephyr,deferred-init; boot still skips
+	  their init, but the static priority table must order parent first.
+
+endif # GPIO_ALTERA_PIO

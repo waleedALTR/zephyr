@@ -5,23 +5,13 @@
  */
 
 /*
- * Remap led0 to the FPGA PIO LED and list it under fpga0 soft-ip so
- * bridge on/off owns deferred init.
+ * Remap led0 to the FPGA PIO LED. Soft-IP is a child of fpga0 so bridge
+ * on/off owns deferred init.
  */
 
 / {
 	aliases {
 		led0 = &pio_led0;
-	};
-
-	fpga_pio_led0: pio_led0@20010080 {
-		compatible = "altr,pio-1.0";
-		reg = <0x20010080 0x20>;
-		direction = "output";
-		gpio-controller;
-		#gpio-cells = <2>;
-		status = "okay";
-		zephyr,deferred-init;
 	};
 
 	leds {
@@ -35,5 +25,15 @@
 };
 
 &fpga0 {
-	soft-ip = <&fpga_pio_led0>;
+	status = "okay";
+
+	fpga_pio_led0: led_pio@20010080 {
+		compatible = "altr,pio-1.0";
+		reg = <0x20010080 0x20>;
+		direction = "output";
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+		zephyr,deferred-init;
+	};
 };

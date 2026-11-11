@@ -147,25 +147,115 @@
 };
 
 /*
- * GHRD fabric soft-IP (LW HPS). Lifecycle follows fpga0 soft-ip /
- * bridge on-off via zephyr,deferred-init.
+ * GHRD fabric soft-IP (LW HPS) as children of fpga0. Lifecycle follows
+ * bridge on/off via zephyr,deferred-init.
+ *
+ * LWH2F map (base 0x20000000):
+ *   button_pio  @ +0x10060  input  f2h_irq0[0] -> GIC SPI 17
+ *   dipsw_pio   @ +0x10070  input  (no IRQ / edge-capture in this GHRD)
+ *   led_pio     @ +0x10080  output (no IRQ)
  */
 / {
 	aliases {
-		sw0 = &button0;
+		led0 = &pio_led0;
+		led1 = &pio_led1;
+		led2 = &pio_led2;
+		led3 = &pio_led3;
+		sw0 = &dipsw0;
+		sw1 = &dipsw1;
+		sw2 = &dipsw2;
+		sw3 = &dipsw3;
 	};
 
-	fpga_pio_led0: pio_led0@20010080 {
+	leds {
+		compatible = "gpio-leds";
+
+		/*
+		 * SM72 GHRD: 4-bit led_pio. On some images bit3 is a fabric
+		 * heartbeat and is not software-controllable.
+		 */
+		pio_led0: pio_led0 {
+			gpios = <&fpga_pio_led0 0 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Fabric PIO LED 0";
+		};
+
+		pio_led1: pio_led1 {
+			gpios = <&fpga_pio_led0 1 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Fabric PIO LED 1";
+		};
+
+		pio_led2: pio_led2 {
+			gpios = <&fpga_pio_led0 2 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Fabric PIO LED 2";
+		};
+
+		pio_led3: pio_led3 {
+			gpios = <&fpga_pio_led0 3 GPIO_ACTIVE_HIGH>;
+			label = "FPGA Fabric PIO LED 3";
+		};
+	};
+
+	buttons {
+		compatible = "gpio-keys";
+
+		button0: button_0 {
+			gpios = <&fpga_pio_button0 0 GPIO_ACTIVE_LOW>;
+			label = "FPGA Button 0";
+		};
+
+		button1: button_1 {
+			gpios = <&fpga_pio_button0 1 GPIO_ACTIVE_LOW>;
+			label = "FPGA Button 1";
+		};
+
+		button2: button_2 {
+			gpios = <&fpga_pio_button0 2 GPIO_ACTIVE_LOW>;
+			label = "FPGA Button 2";
+		};
+
+		button3: button_3 {
+			gpios = <&fpga_pio_button0 3 GPIO_ACTIVE_LOW>;
+			label = "FPGA Button 3";
+		};
+
+		/* DIP switches: idle DATA often 0xF (pulled high); ON is active-low */
+		dipsw0: dipsw_0 {
+			gpios = <&fpga_pio_dipsw0 0 GPIO_ACTIVE_LOW>;
+			label = "FPGA DIP Switch 0";
+		};
+
+		dipsw1: dipsw_1 {
+			gpios = <&fpga_pio_dipsw0 1 GPIO_ACTIVE_LOW>;
+			label = "FPGA DIP Switch 1";
+		};
+
+		dipsw2: dipsw_2 {
+			gpios = <&fpga_pio_dipsw0 2 GPIO_ACTIVE_LOW>;
+			label = "FPGA DIP Switch 2";
+		};
+
+		dipsw3: dipsw_3 {
+			gpios = <&fpga_pio_dipsw0 3 GPIO_ACTIVE_LOW>;
+			label = "FPGA DIP Switch 3";
+		};
+	};
+};
+
+&fpga0 {
+	status = "okay";
+
+	fpga_pio_led0: led_pio@20010080 {
 		compatible = "altr,pio-1.0";
 		reg = <0x20010080 0x20>;
 		direction = "output";
 		gpio-controller;
 		#gpio-cells = <2>;
+		ngpios = <4>;
 		status = "okay";
 		zephyr,deferred-init;
 	};
 
-	fpga_pio_button0: pio_button@20010060 {
+	fpga_pio_button0: button_pio@20010060 {
 		compatible = "altr,pio-1.0";
 		reg = <0x20010060 0x20>;
 		direction = "input";
@@ -177,29 +267,20 @@
 		interrupts = <GIC_SPI 17 IRQ_TYPE_LEVEL IRQ_DEFAULT_PRIORITY>;
 		gpio-controller;
 		#gpio-cells = <2>;
+		ngpios = <4>;
 		status = "okay";
 		zephyr,deferred-init;
 	};
 
-	leds {
-		compatible = "gpio-leds";
-
-		pio_led0: pio_led0 {
-			gpios = <&fpga_pio_led0 0 GPIO_ACTIVE_HIGH>;
-			label = "FPGA Fabric PIO LED 0";
-		};
+	fpga_pio_dipsw0: dipsw_pio@20010070 {
+		compatible = "altr,pio-1.0";
+		reg = <0x20010070 0x20>;
+		direction = "input";
+		/* GHRD: Generate IRQ + edge capture disabled — poll only */
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <4>;
+		status = "okay";
+		zephyr,deferred-init;
 	};
-
-	buttons {
-		compatible = "gpio-keys";
-
-		button0: button_0 {
-			gpios = <&fpga_pio_button0 0 GPIO_ACTIVE_LOW>;
-			label = "FPGA Button";
-		};
-	};
-};
-
-&fpga0 {
-	soft-ip = <&fpga_pio_led0 &fpga_pio_button0>;
 };

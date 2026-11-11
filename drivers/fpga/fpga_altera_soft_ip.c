@@ -14,10 +14,9 @@
 
 LOG_MODULE_REGISTER(fpga_altera_soft_ip, CONFIG_FPGA_LOG_LEVEL);
 
-#define FPGA_SOFT_IP_INIT_BY_IDX(idx, node_id)					\
+#define FPGA_SOFT_IP_INIT_CHILD(node_id)					\
 	do {									\
-		const struct device *sip = DEVICE_DT_GET_OR_NULL(		\
-			DT_PHANDLE_BY_IDX(node_id, soft_ip, idx));		\
+		const struct device *sip = DEVICE_DT_GET_OR_NULL(node_id);	\
 		int sip_ret;							\
 										\
 		if (sip == NULL) {						\
@@ -32,10 +31,9 @@ LOG_MODULE_REGISTER(fpga_altera_soft_ip, CONFIG_FPGA_LOG_LEVEL);
 		}								\
 	} while (0);
 
-#define FPGA_SOFT_IP_DEINIT_BY_IDX(idx, node_id)				\
+#define FPGA_SOFT_IP_DEINIT_CHILD(node_id)					\
 	do {									\
-		const struct device *sip = DEVICE_DT_GET_OR_NULL(		\
-			DT_PHANDLE_BY_IDX(node_id, soft_ip, idx));		\
+		const struct device *sip = DEVICE_DT_GET_OR_NULL(node_id);	\
 		int sip_ret;							\
 										\
 		if (sip == NULL || !device_is_ready(sip)) {			\
@@ -51,12 +49,10 @@ LOG_MODULE_REGISTER(fpga_altera_soft_ip, CONFIG_FPGA_LOG_LEVEL);
 	} while (0);
 
 #define FPGA_SOFT_IP_INIT_INST(inst)						\
-	LISTIFY(DT_INST_PROP_LEN_OR(inst, soft_ip, 0),				\
-		FPGA_SOFT_IP_INIT_BY_IDX, (), DT_DRV_INST(inst))
+	DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), FPGA_SOFT_IP_INIT_CHILD)
 
 #define FPGA_SOFT_IP_DEINIT_INST(inst)						\
-	LISTIFY(DT_INST_PROP_LEN_OR(inst, soft_ip, 0),				\
-		FPGA_SOFT_IP_DEINIT_BY_IDX, (), DT_DRV_INST(inst))
+	DT_FOREACH_CHILD_STATUS_OKAY(DT_DRV_INST(inst), FPGA_SOFT_IP_DEINIT_CHILD)
 
 void altera_fpga_soft_ip_init(void)
 {
