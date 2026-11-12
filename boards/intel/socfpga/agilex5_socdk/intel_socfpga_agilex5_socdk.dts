@@ -12,6 +12,10 @@
 	model = "Intel SoC FPGA Agilex5";
 	compatible = "intel,socfpga-agilex5";
 
+	chosen {
+		zephyr,code-partition = &slot0_partition;
+	};
+
 	aliases {
 		led0 = &led0;
 	};
@@ -49,6 +53,27 @@
 		address-byte = <2>;
 		bytes-per-block = <16>;
 		status = "okay";
+	};
+
+	/*
+	 * Offsets inside the 256 MiB flash, as the Programming File Generator
+	 * places the raw files in the JIC. The flash device is the controller,
+	 * so the partitions are its children.
+	 */
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		slot0_partition: partition@3c00000 {
+			label = "fip";
+			reg = <0x03c00000 DT_SIZE_M(8)>;
+		};
+
+		slot1_partition: partition@f800000 {
+			label = "bitstream";
+			reg = <0x0f800000 DT_SIZE_M(8)>;
+		};
 	};
 };
 
