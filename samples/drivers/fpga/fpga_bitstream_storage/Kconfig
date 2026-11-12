@@ -1,0 +1,49 @@
+# Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+choice SAMPLE_FPGA_BITSTREAM_STORAGE
+	prompt "Storage the bitstream is read from"
+	default SAMPLE_FPGA_BITSTREAM_STORAGE_SDCARD
+	help
+	  Specify the type of storage the bitstream is read from.
+
+config SAMPLE_FPGA_BITSTREAM_STORAGE_SDCARD
+	bool "File on an SD card with a FAT file system"
+	imply DISK_ACCESS
+	imply DISK_DRIVER_SDMMC
+	imply FILE_SYSTEM
+	imply FAT_FILESYSTEM_ELM
+	imply FS_FATFS_LFN
+	help
+	  Read the bitstream file from the FAT volume on the disk named SD,
+	  mounted at /SD:.
+
+config SAMPLE_FPGA_BITSTREAM_STORAGE_FLASH
+	bool "MCUboot image in a flash partition"
+	depends on ZEPHYR_MCUBOOT_MODULE
+	select FLASH
+	select FLASH_MAP
+	help
+	  Read the bitstream from the flash partition with the node label
+	  bitstream_partition. The partition holds an MCUboot image as
+	  written by imgtool: a header with the bitstream size, followed by
+	  the bitstream. The header layout comes from the MCUboot module;
+	  MCUboot itself does not have to be the bootloader.
+
+endchoice
+
+config SAMPLE_FPGA_BITSTREAM_FILE_NAME
+	string "Bitstream file name"
+	default "bitstream.bin"
+	depends on !SAMPLE_FPGA_BITSTREAM_STORAGE_FLASH
+	help
+	  Name of the bitstream file in the root directory of the volume.
+
+config SAMPLE_FPGA_BITSTREAM_MAX_SIZE
+	int "Bitstream buffer size"
+	default 4194304
+	help
+	  Size in bytes of the buffer that holds the bitstream while it is
+	  loaded. A larger bitstream is rejected.
+
+source "Kconfig.zephyr"
