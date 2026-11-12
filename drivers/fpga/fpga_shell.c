@@ -89,8 +89,8 @@ static int cmd_reset(const struct shell *sh, size_t argc, char **argv)
 }
 
 /*
- * Address/size must lie in DT fpga_config staging; the Altera driver rejects
- * out-of-range pointers (-EFAULT) and oversized images (-ENOSR).
+ * The bitstream may be anywhere in memory the driver can reach; the Altera
+ * driver rejects a buffer outside the first 4 GiB of DRAM (-EFAULT).
  */
 static int cmd_load(const struct shell *sh, size_t argc, char **argv)
 {
@@ -122,8 +122,7 @@ static int cmd_load(const struct shell *sh, size_t argc, char **argv)
 
 	err = fpga_load(dev, (uint32_t *)addr, (uint32_t)size);
 	if (err) {
-		shell_error(sh, "Error: %d (check addr/size vs fpga_config staging)",
-			    err);
+		shell_error(sh, "Error: %d", err);
 	}
 
 	return err;
@@ -189,7 +188,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 	SHELL_CMD_ARG(on, NULL, "<device>", cmd_on, 2, 0),
 	SHELL_CMD_ARG(reset, NULL, "<device>", cmd_reset, 2, 0),
 	SHELL_CMD_ARG(load, NULL,
-		      "<device> <address> <size> — full load; addr/size must be in fpga_config",
+		      "<device> <address> <size> — full load",
 		      cmd_load, 4, 0),
 	SHELL_CMD_ARG(get_status, NULL,
 		      "<device> — ACTIVE/INACTIVE; Agilex also prints SDM RECONFIG_STATUS",

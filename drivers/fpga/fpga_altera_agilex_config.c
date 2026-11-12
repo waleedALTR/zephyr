@@ -1182,49 +1182,30 @@ static uint32_t config_thread_start(char *image_ptr, uint32_t img_size)
 	return 0;
 }
 
-/* Will fetch the memory address for the dtsi file */
-static int32_t altera_fpga_get_staging(char **phyaddr, uint32_t *size)
-{
-	*phyaddr = (char *)DT_REG_ADDR(DT_NODELABEL(fpga_config));
-
-	if (*phyaddr == NULL) {
-		LOG_ERR("Failed to get the memory address");
-		return -EADDRNOTAVAIL;
-	}
-
-	*size = DT_REG_SIZE(DT_NODELABEL(fpga_config));
-
-	return 0;
-}
-
 int32_t altera_fpga_config_load(char *image_ptr, uint32_t img_size)
 {
-	char *fpga_memory_addr;
-	uint32_t fpga_memory_size = 0;
+	uintptr_t phys = POINTER_TO_UINT(image_ptr);
 
-	if (!image_ptr)
-		return -EFAULT;
-
-	if (altera_fpga_get_staging(&fpga_memory_addr, &fpga_memory_size)) {
-		LOG_ERR("Failed to get the reserve memory pointer!!");
+	if (image_ptr == NULL) {
 		return -EFAULT;
 	}
 
-	if (!fpga_memory_size || !img_size || (img_size > fpga_memory_size))
+	if (img_size == 0U) {
 		return -ENOSR;
+	}
+
+	/*
+	 * The SDM takes the bitstream address as a 32-bit offset from the start
+	 * of DRAM, so the whole buffer must lie in the first 4 GiB of DRAM.
+	 */
+	if ((phys < AGX5_DRAM_BASE) ||
+	    (((uint64_t)phys - AGX5_DRAM_BASE + img_size) > (UINT64_C(1) << 32))) {
+		return -EFAULT;
+	}
 
 	if (k_mutex_lock(&config_state, K_NO_WAIT)) {
 		LOG_ERR("Failed to acquire mutex lock");
 		return -EBUSY;
-	}
-
-	/* if pointer and size is outside of reserved memory range,
-	 * then return error
-	 */
-	if ((image_ptr < fpga_memory_addr) || (image_ptr > (fpga_memory_addr + fpga_memory_size)) ||
-	    ((image_ptr + img_size) > (fpga_memory_addr + fpga_memory_size))) {
-		k_mutex_unlock(&config_state);
-		return -EFAULT;
 	}
 
 	if (config_thread_start(image_ptr, img_size)) {
