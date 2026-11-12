@@ -1208,11 +1208,23 @@ int32_t altera_fpga_config_load(char *image_ptr, uint32_t img_size)
 		return -EBUSY;
 	}
 
+	fm_reconfig_succeeded = false;
+
 	if (config_thread_start(image_ptr, img_size)) {
 		return -EINVAL;
 	}
 
-	return 0;
+	/*
+	 * The thread runs the whole sequence: bridges off, reconfiguration,
+	 * bridges on. Wait for it, so that the caller gets the result and
+	 * cannot use the SiP clients while the sequence needs them.
+	 */
+	(void)k_thread_join(&config_thread_data, K_FOREVER);
+
+	/* The mutex belongs to this thread, the config thread cannot release it */
+	k_mutex_unlock(&config_state);
+
+	return fm_reconfig_succeeded ? 0 : -EIO;
 }
 
 /* Store the fpga status in config_status_info buffer*/
