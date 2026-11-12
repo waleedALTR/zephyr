@@ -1,0 +1,16 @@
+sample:
+  name: FPGA bitstream storage
+  description: Load an FPGA bitstream read from flash or from an SD card
+common:
+  tags:
+    - fpga
+  build_only: true
+  platform_allow:
+    - intel_socfpga_agilex5_socdk
+  integration_platforms:
+    - intel_socfpga_agilex5_socdk
+tests:
+  sample.drivers.fpga.bitstream_storage.flash: {}
+  sample.drivers.fpga.bitstream_storage.sdcard:
+    extra_configs:
+      - CONFIG_SAMPLE_FPGA_BITSTREAM_STORAGE_SDCARD=y

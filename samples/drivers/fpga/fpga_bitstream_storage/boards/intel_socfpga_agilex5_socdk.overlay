@@ -1,0 +1,14 @@
+/*
+ * Copyright (c) 2026, Altera Corporation.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+	aliases {
+		fpga0 = &fpga0;
+	};
+};
+
+&sip_smc {
+	status = "okay";
+};
