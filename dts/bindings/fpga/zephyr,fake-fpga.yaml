@@ -1,0 +1,9 @@
+# Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Fake FPGA for boards without an FPGA. It accepts any bitstream and logs its size and CRC-32.
+
+compatible: "zephyr,fake-fpga"
+
+include: base.yaml

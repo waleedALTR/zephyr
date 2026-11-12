@@ -1,0 +1,11 @@
+# Copyright (c) 2026, Altera Corporation.
+# SPDX-License-Identifier: Apache-2.0
+
+config FPGA_FAKE
+	bool "Fake FPGA driver"
+	default y
+	depends on DT_HAS_ZEPHYR_FAKE_FPGA_ENABLED
+	select CRC
+	help
+	  Enable the fake FPGA driver. It accepts any bitstream and logs its
+	  size and CRC-32, for use on boards without an FPGA.
