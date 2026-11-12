@@ -50,6 +50,27 @@
 		bytes-per-block = <16>;
 		status = "okay";
 	};
+
+	/*
+	 * Offsets inside the 256 MiB flash, as the Programming File Generator
+	 * places the raw files in the JIC. The flash device is the controller,
+	 * so the partitions are its children.
+	 */
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		fip_partition: partition@3c00000 {
+			label = "fip";
+			reg = <0x03c00000 DT_SIZE_M(8)>;
+		};
+
+		bitstream_partition: partition@4400000 {
+			label = "bitstream";
+			reg = <0x04400000 DT_SIZE_M(8)>;
+		};
+	};
 };
 
 &xgmac2 {
