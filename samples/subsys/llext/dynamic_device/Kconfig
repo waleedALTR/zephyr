@@ -1,0 +1,22 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+mainmenu "LLEXT dynamic device sample"
+
+config DRIVER_MODULE_FS
+	bool "Load driver modules from a file system on a RAM disk"
+	default y
+	depends on DT_HAS_ZEPHYR_RAM_DISK_ENABLED
+	select FILE_SYSTEM
+	select FAT_FILESYSTEM_ELM
+	imply FS_FATFS_LFN
+	help
+	  Read the driver extensions from a FAT file system on the RAM disk,
+	  which QEMU fills with an image generated at build time. Otherwise
+	  the extensions are embedded in the image.
+
+# QEMU writes the disk image into the ramdisk_mem region before boot
+config QEMU_EXTRA_FLAGS
+	default "-device loader,file=ramdisk.img,addr=$(dt_nodelabel_reg_addr_hex,ramdisk_mem),force-raw=on" if DRIVER_MODULE_FS
+
+source "Kconfig.zephyr"

@@ -1,0 +1,55 @@
+/*
+ * Copyright The Zephyr Project Contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/*
+ * The on-chip memory is mapped by the SoC and not used by Zephyr. Its first
+ * 64 KiB hold the RAM disk, which QEMU fills with the disk image before boot,
+ * and its last page stands in for the GPIO registers.
+ */
+/ {
+	ramdisk_mem: memory@1000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x1000 0x10000>;
+		zephyr,memory-region = "RAMDISK";
+	};
+
+	ramdisk0 {
+		compatible = "zephyr,ram-disk";
+		disk-name = "RAM";
+		sector-size = <512>;
+		sector-count = <128>;
+		ram-region = <&ramdisk_mem>;
+	};
+
+	gpio_latch0: gpio@2f000 {
+		compatible = "gpio-mmio-latch";
+		reg = <0x2f000 0x4>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		initial-output = <0x5a>;
+		zephyr,mutable;
+		zephyr,deferred-init;
+		status = "okay";
+	};
+
+	gpio_mmio32_0: gpio@2f004 {
+		compatible = "arm,mmio32-gpio";
+		reg = <0x2f004 0x4>;
+		gpio-controller;
+		#gpio-cells = <1>;
+		ngpios = <8>;
+		zephyr,mutable;
+		zephyr,deferred-init;
+		status = "okay";
+	};
+
+	zephyr,user {
+		led-gpios = <&gpio_latch0 3 GPIO_ACTIVE_LOW>, <&gpio_mmio32_0 5>;
+	};
+};

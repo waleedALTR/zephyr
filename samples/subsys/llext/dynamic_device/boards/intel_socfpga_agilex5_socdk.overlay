@@ -1,0 +1,52 @@
+/*
+ * Copyright The Zephyr Project Contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm64.h>
+
+/*
+ * The last page of RAM is taken from Zephyr and stands in for the GPIO
+ * registers. There is no RAM disk, so the extensions are embedded in the image.
+ */
+&mem0 {
+	reg = <0x80100000 (DT_SIZE_M(8) - 0x1000)>;
+};
+
+/ {
+	gpio_mem: memory@808ff000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x808ff000 0x1000>;
+		zephyr,memory-region = "GPIO";
+		zephyr,memory-attr = <DT_MEM_ARM64_MMU_NORMAL_NC>;
+	};
+
+	gpio_latch0: gpio@808ff000 {
+		compatible = "gpio-mmio-latch";
+		reg = <0x808ff000 0x4>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		initial-output = <0x5a>;
+		zephyr,mutable;
+		zephyr,deferred-init;
+		status = "okay";
+	};
+
+	gpio_mmio32_0: gpio@808ff004 {
+		compatible = "arm,mmio32-gpio";
+		reg = <0x808ff004 0x4>;
+		gpio-controller;
+		#gpio-cells = <1>;
+		ngpios = <8>;
+		zephyr,mutable;
+		zephyr,deferred-init;
+		status = "okay";
+	};
+
+	zephyr,user {
+		led-gpios = <&gpio_latch0 3 GPIO_ACTIVE_LOW>, <&gpio_mmio32_0 5>;
+	};
+};

@@ -1,0 +1,67 @@
+/*
+ * Copyright The Zephyr Project Contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-arm64.h>
+
+/*
+ * The top of RAM is taken from Zephyr: 64 KiB hold the RAM disk, which QEMU
+ * fills with the disk image before boot, and the last page stands in for the
+ * GPIO registers.
+ */
+&sram0 {
+	reg = <0x0 0x40000000 0x0 (DT_SIZE_M(128) - 0x11000)>;
+};
+
+/ {
+	ramdisk_mem: memory@47fef000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x0 0x47fef000 0x0 0x10000>;
+		zephyr,memory-region = "RAMDISK";
+	};
+
+	ramdisk0 {
+		compatible = "zephyr,ram-disk";
+		disk-name = "RAM";
+		sector-size = <512>;
+		sector-count = <128>;
+		ram-region = <&ramdisk_mem>;
+	};
+
+	gpio_mem: memory@47fff000 {
+		compatible = "zephyr,memory-region";
+		reg = <0x0 0x47fff000 0x0 0x1000>;
+		zephyr,memory-region = "GPIO";
+		zephyr,memory-attr = <DT_MEM_ARM64_MMU_NORMAL_NC>;
+	};
+
+	gpio_latch0: gpio@47fff000 {
+		compatible = "gpio-mmio-latch";
+		reg = <0x0 0x47fff000 0x0 0x4>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		initial-output = <0x5a>;
+		zephyr,mutable;
+		zephyr,deferred-init;
+		status = "okay";
+	};
+
+	gpio_mmio32_0: gpio@47fff004 {
+		compatible = "arm,mmio32-gpio";
+		reg = <0x0 0x47fff004 0x0 0x4>;
+		gpio-controller;
+		#gpio-cells = <1>;
+		ngpios = <8>;
+		zephyr,mutable;
+		zephyr,deferred-init;
+		status = "okay";
+	};
+
+	zephyr,user {
+		led-gpios = <&gpio_latch0 3 GPIO_ACTIVE_LOW>, <&gpio_mmio32_0 5>;
+	};
+};
