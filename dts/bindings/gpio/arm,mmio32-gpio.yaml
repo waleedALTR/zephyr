@@ -2,7 +2,7 @@ description: ARM MMIO32 GPIO
 
 compatible: "arm,mmio32-gpio"
 
-include: [gpio-controller.yaml, base.yaml]
+include: [gpio-controller.yaml, base.yaml, mutable.yaml]
 
 properties:
   reg:
