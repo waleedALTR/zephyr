@@ -4,6 +4,14 @@ zephyr_library()
 
 zephyr_library_sources_ifdef(CONFIG_FPGA_SHELL  fpga_shell.c)
 
+if(CONFIG_FPGA_SHELL_LOAD_IMAGE)
+  # Only the image header layout is taken from the MCUboot module
+  zephyr_library_include_directories(
+    ${ZEPHYR_MCUBOOT_MODULE_DIR}/boot/bootutil/include
+    ${ZEPHYR_MCUBOOT_MODULE_DIR}/boot/zephyr/include
+  )
+endif()
+
 zephyr_library_sources_ifdef(CONFIG_ALTERA_AGILEX_BRIDGE_FPGA     fpga_altera_agilex_bridge.c)
 zephyr_library_sources_ifdef(CONFIG_ALTERA_AGILEX_BRIDGE_FPGA     fpga_altera_agilex_config.c)
 zephyr_library_sources_ifdef(CONFIG_ALTERA_AGILEX_BRIDGE_FPGA     fpga_altera_soft_ip.c)

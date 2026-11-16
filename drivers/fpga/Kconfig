@@ -26,6 +26,25 @@ config FPGA_SHELL
 	help
 	  Enable FPGA Shell support.
 
+config FPGA_SHELL_LOAD_IMAGE
+	bool "FPGA Shell command to load an MCUboot image"
+	depends on FPGA_SHELL
+	depends on FLASH_MAP
+	depends on ZEPHYR_MCUBOOT_MODULE
+	help
+	  Enable the load_image command, which loads a bitstream stored in a
+	  flash area behind an MCUboot image header, as written by imgtool.
+	  The header layout comes from the MCUboot module; MCUboot itself
+	  does not have to be the bootloader.
+
+config FPGA_SHELL_LOAD_IMAGE_MAX_SIZE
+	int "Bitstream buffer size of the load_image command"
+	default 4194304
+	depends on FPGA_SHELL_LOAD_IMAGE
+	help
+	  Size in bytes of the static buffer the load_image command reads
+	  the bitstream into. A larger bitstream is rejected.
+
 source "drivers/fpga/Kconfig.altera_agilex_bridge"
 source "drivers/fpga/Kconfig.eos_s3"
 source "drivers/fpga/Kconfig.fake"
