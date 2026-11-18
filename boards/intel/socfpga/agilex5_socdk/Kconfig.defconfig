@@ -24,3 +24,24 @@ configdefault NET_MGMT_EVENT_STACK_SIZE
 
 configdefault NET_SOCKETS_SERVICE_STACK_SIZE
 	default 3072
+
+if BOARD_INTEL_SOCFPGA_AGILEX5_SOCDK_AGILEX5_NAND && BOOTLOADER_MCUBOOT
+
+# MCUboot runs from the first MiB of mem0 and loads the application to the
+# other 7. Signing takes the load address from zephyr,sram, i.e. mem0.
+configdefault SRAM_BASE_ADDRESS
+	default 0x80200000
+
+configdefault SRAM_SIZE
+	default 7168
+
+configdefault KERNEL_VM_BASE
+	default 0x80200000
+
+configdefault KERNEL_VM_SIZE
+	default 0x700000
+
+configdefault MCUBOOT_EXTRA_IMGTOOL_ARGS
+	default "--load-addr 0x80200000"
+
+endif # BOARD_INTEL_SOCFPGA_AGILEX5_SOCDK_AGILEX5_NAND && BOOTLOADER_MCUBOOT

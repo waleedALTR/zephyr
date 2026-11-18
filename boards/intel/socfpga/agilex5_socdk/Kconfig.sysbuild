@@ -1,0 +1,15 @@
+# Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_INTEL_SOCFPGA_AGILEX5_SOCDK_AGILEX5_NAND
+
+# MCUboot in the QSPI FIP loads the application from a NAND slot to DDR
+choice BOOTLOADER
+	default BOOTLOADER_MCUBOOT
+endchoice
+
+choice MCUBOOT_MODE
+	default MCUBOOT_MODE_RAM_LOAD
+endchoice
+
+endif # BOARD_INTEL_SOCFPGA_AGILEX5_SOCDK_AGILEX5_NAND

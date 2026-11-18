@@ -12,6 +12,15 @@
 	model = "Intel SoC FPGA Agilex5 NAND daughter board";
 	compatible = "intel,socfpga-agilex5-socdk-nand", "intel,socfpga-agilex5";
 
+	chosen {
+		/* Image slots for MCUboot. The NAND is not memory mapped and
+		 * nothing is linked to it.
+		 */
+		zephyr,flash = &nand;
+		zephyr,flash-controller = &nand;
+		zephyr,uart-mcumgr = &uart0;
+	};
+
 	aliases {
 		led0 = &led0;
 		led1 = &led1;
@@ -55,14 +64,31 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		nand_fip_partition: partition@0 {
+		/* TF-A FIP, read from 0x200000 when TF-A boots from NAND. Its BL33
+		 * is MCUboot. Block 10 (0xa00000), right after it, is bad on the
+		 * SoC DK.
+		 */
+		boot_partition: partition@200000 {
 			label = "fip";
-			reg = <0x0 DT_SIZE_M(10)>;
+			reg = <0x00200000 DT_SIZE_M(8)>;
 		};
 
-		nand_storage_partition: partition@a00000 {
+		/* MCUboot image slots, sized for the 7 MiB an application is
+		 * loaded to. Raw NAND: a bad block is not skipped.
+		 */
+		slot0_partition: partition@b00000 {
+			label = "image-0";
+			reg = <0x00b00000 DT_SIZE_M(8)>;
+		};
+
+		slot1_partition: partition@1300000 {
+			label = "image-1";
+			reg = <0x01300000 DT_SIZE_M(8)>;
+		};
+
+		nand_storage_partition: partition@1b00000 {
 			label = "storage";
-			reg = <0x00a00000 0xff600000>;
+			reg = <0x01b00000 0xfe500000>;
 		};
 	};
 };
