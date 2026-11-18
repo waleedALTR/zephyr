@@ -250,7 +250,7 @@ static int flash_cad_init(const struct device *dev)
 		   (static void cad_qspi_irq_config_##inst(void);))                                \
 	enum {                                                                                     \
 		INST_##inst##_BYTES = (DT_PROP(DEVICE_NODE, size) / 8),                            \
-		INST_##inst##_PAGES = (INST_##inst##_BYTES / DT_PROP(DEVICE_NODE, page_size)),     \
+		INST_##inst##_PAGES = (INST_##inst##_BYTES / DT_PROP(DEVICE_NODE, subsector_size)),\
 	};                                                                                         \
 	static struct flash_cad_priv flash_cad_priv_##inst = {                                     \
 		.params =                                                                          \
@@ -275,7 +275,7 @@ static int flash_cad_init(const struct device *dev)
 		IF_ENABLED(CONFIG_FLASH_PAGE_LAYOUT,                                               \
 			   (.pages_layout = {                                                      \
 				    .pages_count = INST_##inst##_PAGES,                            \
-				    .pages_size = DT_PROP(DEVICE_NODE, page_size),                 \
+				    .pages_size = DT_PROP(DEVICE_NODE, subsector_size),            \
 			    },                                                                     \
 		IF_ENABLED(CONFIG_CAD_QSPI_INTERRUPT_SUPPORT,                                      \
 				   (.irq_config = cad_qspi_irq_config_##inst,))                    \

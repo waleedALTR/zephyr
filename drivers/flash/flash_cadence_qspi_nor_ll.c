@@ -37,6 +37,8 @@ int cad_qspi_read_bank_using_interrupt(struct cad_qspi_params *cad_params, uint8
 				       uint32_t offset, uint32_t size);
 #endif
 
+void cad_qspi_reset(struct cad_qspi_params *cad_params);
+
 int cad_qspi_idle(struct cad_qspi_params *cad_params)
 {
 	if (cad_params == NULL) {
@@ -716,6 +718,15 @@ int cad_qspi_init(struct cad_qspi_params *cad_params, uint32_t clk_phase, uint32
 		return status;
 	}
 
+	/*
+	 * The driver sends 3-byte addresses and selects banks with the extended address register,
+	 * but an earlier boot stage such as U-Boot may have left the flash in 4-byte address mode.
+	 * In that mode the flash takes the first data byte as part of the address and programs
+	 * the wrong location. A software reset restores 3-byte mode and bank 0.
+	 */
+	cad_qspi_reset(cad_params);
+	k_busy_wait(100);
+
 	qspi_desired_clk_freq = 100;
 	cad_qspi_calibration(cad_params, qspi_desired_clk_freq, cad_params->clk_rate);
 
@@ -900,9 +911,27 @@ int cad_qspi_write_bank(struct cad_qspi_params *cad_params, uint32_t offset, uin
 #endif
 }
 
+/*
+ * Boot stages read the flash with 3-byte addresses and a reset does not clear the extended
+ * address register, so it must be back at bank 0 after any access above the first 16 MiB.
+ */
+static int cad_qspi_restore_bank(struct cad_qspi_params *cad_params, uint32_t last_addr,
+				 int status)
+{
+	int ret;
+
+	if (CAD_QSPI_BANK_ADDR(last_addr) == 0) {
+		return status;
+	}
+
+	ret = cad_qspi_device_bank_select(cad_params, 0);
+
+	return (status != 0) ? status : ret;
+}
+
 int cad_qspi_read(struct cad_qspi_params *cad_params, void *buffer, uint32_t offset, uint32_t size)
 {
-	uint32_t bank_count, bank_addr, bank_offset, copy_len;
+	uint32_t bank_count, bank_addr, bank_offset, copy_len, last_addr;
 	uint8_t *read_data;
 	int status;
 
@@ -918,6 +947,8 @@ int cad_qspi_read(struct cad_qspi_params *cad_params, void *buffer, uint32_t off
 		LOG_ERR("Invalid read parameter\n");
 		return -EINVAL;
 	}
+
+	last_addr = offset + size - 1;
 
 	if (CAD_QSPI_INDRD_RD_STAT(sys_read32(cad_params->reg_base + CAD_QSPI_INDRD))) {
 		LOG_ERR("Read in progress\n");
@@ -962,7 +993,7 @@ int cad_qspi_read(struct cad_qspi_params *cad_params, void *buffer, uint32_t off
 		copy_len = MIN(size, CAD_QSPI_BANK_SIZE);
 	}
 
-	return status;
+	return cad_qspi_restore_bank(cad_params, last_addr, status);
 }
 
 int cad_qspi_erase(struct cad_qspi_params *cad_params, uint32_t offset, uint32_t size)
@@ -976,6 +1007,7 @@ int cad_qspi_erase(struct cad_qspi_params *cad_params, uint32_t offset, uint32_t
 
 	uint32_t subsector_offset = offset & (cad_params->qspi_device_subsector_size - 1);
 	uint32_t erase_size = MIN(size, cad_params->qspi_device_subsector_size - subsector_offset);
+	uint32_t last_addr = offset + size - 1;
 
 	while (size) {
 		status = cad_qspi_erase_subsector(cad_params, offset);
@@ -988,13 +1020,13 @@ int cad_qspi_erase(struct cad_qspi_params *cad_params, uint32_t offset, uint32_t
 		size -= erase_size;
 		erase_size = MIN(size, cad_params->qspi_device_subsector_size);
 	}
-	return status;
+	return cad_qspi_restore_bank(cad_params, last_addr, status);
 }
 
 int cad_qspi_write(struct cad_qspi_params *cad_params, void *buffer, uint32_t offset, uint32_t size)
 {
 	int status, i;
-	uint32_t bank_count, bank_addr, bank_offset, copy_len;
+	uint32_t bank_count, bank_addr, bank_offset, copy_len, last_addr;
 	uint8_t *write_data;
 
 	status = 0;
@@ -1014,6 +1046,8 @@ int cad_qspi_write(struct cad_qspi_params *cad_params, void *buffer, uint32_t of
 		LOG_ERR("QSPI Error: Write in progress\n");
 		return -ENOTBLK;
 	}
+
+	last_addr = offset + size - 1;
 
 	bank_count = CAD_QSPI_BANK_ADDR(offset + size - 1) - CAD_QSPI_BANK_ADDR(offset) + 1;
 	bank_addr = offset & CAD_QSPI_BANK_ADDR_MSK;
@@ -1042,7 +1076,7 @@ int cad_qspi_write(struct cad_qspi_params *cad_params, void *buffer, uint32_t of
 
 		copy_len = MIN(size, CAD_QSPI_BANK_SIZE);
 	}
-	return status;
+	return cad_qspi_restore_bank(cad_params, last_addr, status);
 }
 
 int cad_qspi_update(struct cad_qspi_params *cad_params, void *Buffer, uint32_t offset,
