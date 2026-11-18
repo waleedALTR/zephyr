@@ -111,6 +111,12 @@ SECTIONS
         z_mapped_start = .;
 #endif
 
+/* Located in generated directory. This file is populated by calling
+ * zephyr_linker_sources(ROM_START ...). It reserves CONFIG_ROM_START_OFFSET
+ * bytes, for example for an MCUboot image header.
+ */
+#include <snippets-rom-start.ld>
+
 #ifdef CONFIG_AARCH64_IMAGE_HEADER
         KEEP(*(.image_header))
         KEEP(*(".image_header.*"))
