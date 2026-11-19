@@ -59,15 +59,19 @@ static void row_address_set(struct cadence_nand_params *params, uint32_t *local_
 			    uint32_t page_set)
 {
 	uint32_t block_number = 0;
+	uint8_t block_shift = params->page_size_bit;
+	uint8_t lun_shift = params->page_size_bit + params->block_size_bit;
 
 	block_number = ((page_set) / (params->npages_per_block));
 	*local_row_address = 0;
 	*local_row_address |= ROW_VAL_SET((params->page_size_bit) - 1, 0,
 					  ((page_set) % (params->npages_per_block)));
-	*local_row_address |=
-		ROW_VAL_SET((params->block_size_bit) - 1, (params->page_size_bit), block_number);
-	*local_row_address |= ROW_VAL_SET((params->lun_size_bit) - 1, (params->block_size_bit),
-					  (block_number / params->nblocks_per_lun));
+	*local_row_address |= ROW_VAL_SET(lun_shift - 1, block_shift,
+					  (block_number % params->nblocks_per_lun));
+	if (params->lun_size_bit != 0) {
+		*local_row_address |= ROW_VAL_SET(lun_shift + params->lun_size_bit - 1, lun_shift,
+						  (block_number / params->nblocks_per_lun));
+	}
 }
 
 /**
